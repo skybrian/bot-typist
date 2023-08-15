@@ -1,0 +1,60 @@
+{
+  "name": "bot-typist",
+  "publisher": "skybrian",
+
+  "displayName": "Bot Typist",
+  "description": "Chat with GPT4 in any text file",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.81.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:plaintext",
+    "onLanguage:markdown"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "Bot Typist",
+      "properties": {
+        "bot-typist.llm.path": {
+          "type": "string",
+          "default": "llm",
+          "scope": "machine-overridable",
+          "markdownDescription":
+            "Path to the 'llm' command to use. To install this command, see the [LLM Documentation](https://llm.datasette.io/en/stable/setup.html)"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "bot-typist.type",
+        "title": "Talk to Bot"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.81.0",
+    "@types/glob": "^8.1.0",
+    "@types/mocha": "^10.0.1",
+    "@types/node": "20.2.5",
+    "@typescript-eslint/eslint-plugin": "^5.59.8",
+    "@typescript-eslint/parser": "^5.59.8",
+    "eslint": "^8.41.0",
+    "glob": "^8.1.0",
+    "mocha": "^10.2.0",
+    "typescript": "^5.1.3",
+    "@vscode/test-electron": "^2.3.2"
+  }
+}
