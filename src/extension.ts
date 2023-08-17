@@ -197,6 +197,23 @@ function showConfigError(msg: string) {
   });
 }
 
+/**
+ * Returns the position of the start of the prompt to send to the llm tool.
+ * If there is a <blockquote> element, it returns the start of the line after that.
+ * Otherwise, it returns the first line of the document.
+ * @param ed The editor to search.
+ * @param endLine The line number after the last line of the prompt.
+ */
+function choosePromptStart(ed: vscode.TextEditor, endLine: number): vscode.Position {
+  for (let i = endLine - 1; i >= 0; i--) {
+    const line = ed.document.lineAt(i);
+    if (line.text.trim() === "<blockquote>") {
+      return line.range.start.translate(1);
+    }
+  }
+  return new vscode.Position(0, 0);
+}
+
 async function typeAsBot() {
   console.log("typeAsBot called");
 
@@ -219,7 +236,7 @@ async function typeAsBot() {
   const lineEnd = line.range.end;
   ed.selection = new vscode.Selection(lineEnd, lineEnd);
 
-  // Choose prompt and prefix to type, if needed
+  // Choose prefix to type at end of line
   console.log(`line: '${line.text}'`);
   let prefix = "\n\nbot: ";
   if (line.text.length === 0) {
@@ -238,7 +255,7 @@ async function typeAsBot() {
   } else if (line.text === "bot") {
     prefix = ": ";
   }
-  console.log(`prompt: '${prefix}'`);
+  console.log(`prefix: '${prefix}'`);
 
   const here = ed.selection.active;
   ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
@@ -246,7 +263,9 @@ async function typeAsBot() {
     if (!await typeText(prefix)) {
       return;
     }
-    const promptRange = new vscode.Range(new vscode.Position(0, 0), ed.selection.active);
+    const promptStart = choosePromptStart(ed, ed.selection.active.line);
+    console.log(`prompt start: ${ed.document.lineAt(promptStart.line).text}`);
+    const promptRange = new vscode.Range(promptStart, ed.selection.active);
     const prompt = ed.document.getText(promptRange);
 
     await typeOutputToEditor(path, [], prompt);
