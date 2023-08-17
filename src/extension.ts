@@ -22,6 +22,7 @@ function getCommandPath() {
 enum ConfigState {
   unconfigured,
   commandNotFound,
+  commandTimedOut,
   commandDidntRun,
   ok,
 }
@@ -40,7 +41,7 @@ async function checkCommandPath(
 
   try {
     const { stdout, stderr } = await execFile(path, ["--version"], {
-      timeout: 1000,
+      timeout: 2000,
     });
 
     if (stderr) {
@@ -51,6 +52,13 @@ async function checkCommandPath(
     console.log(`llm output: '${stdout}'`);
     return ConfigState.ok;
   } catch (e) {
+    if (typeof e === "object" && e !== null && "signal" in e) {
+      console.log(`llm error: ${e} signal: ${e.signal}`);
+      if (e.signal === "SIGTERM") {
+        return ConfigState.commandTimedOut;
+      }
+      return ConfigState.commandDidntRun;
+    }
     console.log(`llm error: ${e}`);
     return ConfigState.commandNotFound;
   }
@@ -214,6 +222,24 @@ function choosePromptStart(ed: vscode.TextEditor, endLine: number): vscode.Posit
   return new vscode.Position(0, 0);
 }
 
+function choosePrompt(ed: vscode.TextEditor, noteEd?: vscode.NotebookEditor) {
+  if (ed.selection.active.line === 0 && noteEd && !noteEd.selection.isEmpty) {
+    const sel = noteEd.selection;
+    if (sel.start > 0 && sel.end - sel.start === 1) {
+      const prevCell = noteEd.notebook.cellAt(sel.start - 1);
+      if (prevCell.kind === vscode.NotebookCellKind.Markup) {
+        return prevCell.document.getText();
+      }
+    }
+  }
+  
+  const promptStart = choosePromptStart(ed, ed.selection.active.line);
+  console.log(`prompt start: ${ed.document.lineAt(promptStart.line).text}`);
+  const promptRange = new vscode.Range(promptStart, ed.selection.active);
+  const prompt = ed.document.getText(promptRange);
+  return prompt;
+}
+
 async function typeAsBot() {
   console.log("typeAsBot called");
 
@@ -263,10 +289,7 @@ async function typeAsBot() {
     if (!await typeText(prefix)) {
       return;
     }
-    const promptStart = choosePromptStart(ed, ed.selection.active.line);
-    console.log(`prompt start: ${ed.document.lineAt(promptStart.line).text}`);
-    const promptRange = new vscode.Range(promptStart, ed.selection.active);
-    const prompt = ed.document.getText(promptRange);
+    const prompt = choosePrompt(ed, vscode.window.activeNotebookEditor);
 
     await typeOutputToEditor(path, [], prompt);
     await typeText('\n');
