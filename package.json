@@ -33,6 +33,10 @@
       {
         "command": "bot-typist.type",
         "title": "Talk to Bot"
+      },
+      {
+        "command": "bot-typist.insert-reply-below",
+        "title": "Bot: Insert Reply Below"
       }
     ]
   },

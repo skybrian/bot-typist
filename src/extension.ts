@@ -194,6 +194,38 @@ function typeOutputToEditor(command: string, args: string[], stdin: string): Pro
   });
 }
 
+async function typeBotReply(ed: vscode.TextEditor, prompt: string, options?: {prefix?: string, suffix?: string}): Promise<boolean> {
+  const path = getCommandPath();
+  if (!path || await checkCommandPath(path) !== ConfigState.ok) {
+    showConfigError(
+      `Can't run llm command. Check that bot-typist.llm.path is set correctly in settings.`,
+    );
+    return false;
+  }
+
+  const here = ed.selection.active;
+  ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
+  try {
+    const prefix = options?.prefix;
+    if (prefix && !await typeText(prefix)) {
+      return false;
+    }
+
+    if (!await typeOutputToEditor(path, [], prompt)) {
+      return false;
+    }
+
+    const suffix = options?.suffix;
+    if (suffix && !await typeText(suffix)) {
+      return false;
+    }
+
+    return true;
+  } finally {
+    ed.setDecorations(decorationType, []);
+  }
+}
+
 function showConfigError(msg: string) {
   vscode.window.showErrorMessage(msg, "Open Settings").then((choice) => {
     if (choice === "Open Settings") {
@@ -222,11 +254,22 @@ function choosePromptStart(ed: vscode.TextEditor, endLine: number): vscode.Posit
   return new vscode.Position(0, 0);
 }
 
+function getActiveCell(ed: vscode.NotebookEditor): vscode.NotebookCell | undefined {
+  if (!ed) {
+    return undefined;
+  }
+  const sel = ed.selection;
+  if (sel.end - sel.start !== 1) {
+    return undefined;
+  }
+  return ed.notebook.cellAt(sel.start);
+}
+
 function choosePrompt(ed: vscode.TextEditor, noteEd?: vscode.NotebookEditor) {
-  if (ed.selection.active.line === 0 && noteEd && !noteEd.selection.isEmpty) {
-    const sel = noteEd.selection;
-    if (sel.start > 0 && sel.end - sel.start === 1) {
-      const prevCell = noteEd.notebook.cellAt(sel.start - 1);
+  if (ed.selection.active.line === 0 && noteEd) {
+    const cell = getActiveCell(noteEd);
+    if (cell && cell.index > 0) {
+      const prevCell = noteEd.notebook.cellAt(cell.index - 1);
       if (prevCell.kind === vscode.NotebookCellKind.Markup) {
         return prevCell.document.getText();
       }
@@ -246,14 +289,6 @@ async function typeAsBot() {
   const ed = vscode.window.activeTextEditor;
   if (!ed || ed.selections.length !== 1 || !ed.selection.isEmpty) {
     console.log("typeAsBot: selection not empty");
-    return false;
-  }
-
-  const path = getCommandPath();
-  if (!path || await checkCommandPath(path) !== ConfigState.ok) {
-    showConfigError(
-      `Can't run llm command. Check that bot-typist.llm.path is set correctly in settings.`,
-    );
     return false;
   }
 
@@ -283,19 +318,55 @@ async function typeAsBot() {
   }
   console.log(`prefix: '${prefix}'`);
 
-  const here = ed.selection.active;
-  ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
-  try {
-    if (!await typeText(prefix)) {
+  const prompt = choosePrompt(ed, vscode.window.activeNotebookEditor);
+  await typeBotReply(ed, prompt, {prefix, suffix: '\n'});
+}
+
+/** If in a notebook cell, insert a new markdown cell with the bot's reply. */
+async function insertReplyBelow(): Promise<boolean> {
+  const noteEd = vscode.window.activeNotebookEditor;
+  if (!noteEd) {
+    console.log("insertReplyBelow: no notebook editor");
+    return false;
+  }
+  const promptCell = getActiveCell(noteEd);
+  if (!promptCell) {
+    console.log("insertReplyBelow: no active cell");
+    return false;
+  }
+
+  await vscode.commands.executeCommand("notebook.cell.insertMarkdownCellBelow");
+  await vscode.commands.executeCommand("notebook.cell.edit");
+
+  const ed = vscode.window.activeTextEditor;
+  if (!ed) {
+    console.log("insertReplyBelow: can't edit new cell");
+    return false;
+  }
+  if (ed.document.getText().length > 0) {
+    console.log("insertReplyBelow: new cell should be empty");
+    return false;
+  }
+
+  const prompt = promptCell.document.getText();
+  if (!await typeBotReply(ed, prompt, {})) {
+    return false;
+  }
+
+  // Remove trailing blank line in reply cell
+  await ed.edit((builder) => {
+    if (ed.document.lineCount < 2) {
       return;
     }
-    const prompt = choosePrompt(ed, vscode.window.activeNotebookEditor);
-
-    await typeOutputToEditor(path, [], prompt);
-    await typeText('\n');
-  } finally {
-    ed.setDecorations(decorationType, []);
-  }
+    const last = ed.document.lineAt(ed.document.lineCount - 1);
+    if (!last.isEmptyOrWhitespace) {
+      return;
+    }
+    const prev = ed.document.lineAt(ed.document.lineCount - 2);
+    builder.delete(new vscode.Range(prev.range.end, last.rangeIncludingLineBreak.end));
+  });
+ 
+  return await vscode.commands.executeCommand("notebook.cell.insertMarkdownCellBelow");
 }
 
 const botPattern = /bot:?\s*$/;
@@ -324,7 +395,11 @@ export function activate(context: vscode.ExtensionContext) {
   console.log("activate called");
 
   const push = context.subscriptions.push.bind(context.subscriptions);
+
+  // commands
   push(vscode.commands.registerCommand("bot-typist.type", typeAsBot));
+  push(vscode.commands.registerCommand("bot-typist.insert-reply-below", insertReplyBelow));
+
   push(
     vscode.languages.registerCompletionItemProvider(selector, completion, ":"),
   );
