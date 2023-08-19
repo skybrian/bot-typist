@@ -254,7 +254,8 @@ function choosePromptStart(ed: vscode.TextEditor, endLine: number): vscode.Posit
   return new vscode.Position(0, 0);
 }
 
-function getActiveCell(ed: vscode.NotebookEditor): vscode.NotebookCell | undefined {
+function getActiveCell(): vscode.NotebookCell | undefined {
+  const ed = vscode.window.activeNotebookEditor;
   if (!ed) {
     return undefined;
   }
@@ -265,17 +266,27 @@ function getActiveCell(ed: vscode.NotebookEditor): vscode.NotebookCell | undefin
   return ed.notebook.cellAt(sel.start);
 }
 
-function choosePrompt(ed: vscode.TextEditor, noteEd?: vscode.NotebookEditor) {
-  if (ed.selection.active.line === 0 && noteEd) {
-    const cell = getActiveCell(noteEd);
-    if (cell && cell.index > 0) {
-      const prevCell = noteEd.notebook.cellAt(cell.index - 1);
-      if (prevCell.kind === vscode.NotebookCellKind.Markup) {
-        return prevCell.document.getText();
+function choosePrompt(): string | undefined {
+  const cell = getActiveCell();
+  if (cell) {
+      // Include the text of each cell up to the current one.
+      let prompt = '';
+      for (let i = 0; i <= cell.index; i++) {
+        const c = cell.notebook.cellAt(i);
+        if (i > 0) {
+          prompt += '\n%%\n';
+        }
+        prompt += c.document.getText();
       }
-    }
+
+      return prompt;
   }
-  
+
+  const ed = vscode.window.activeTextEditor;
+  if (!ed) {
+    return undefined;
+  }
+
   const promptStart = choosePromptStart(ed, ed.selection.active.line);
   console.log(`prompt start: ${ed.document.lineAt(promptStart.line).text}`);
   const promptRange = new vscode.Range(promptStart, ed.selection.active);
@@ -285,6 +296,12 @@ function choosePrompt(ed: vscode.TextEditor, noteEd?: vscode.NotebookEditor) {
 
 async function typeAsBot() {
   console.log("typeAsBot called");
+
+  const prompt = choosePrompt();
+  if (!prompt) {
+    console.log("typeAsBot: no prompt");
+    return;
+  }
 
   const ed = vscode.window.activeTextEditor;
   if (!ed || ed.selections.length !== 1 || !ed.selection.isEmpty) {
@@ -318,55 +335,66 @@ async function typeAsBot() {
   }
   console.log(`prefix: '${prefix}'`);
 
-  const prompt = choosePrompt(ed, vscode.window.activeNotebookEditor);
   await typeBotReply(ed, prompt, {prefix, suffix: '\n'});
 }
 
 /** If in a notebook cell, insert a new markdown cell with the bot's reply. */
 async function insertReplyBelow(): Promise<boolean> {
-  const noteEd = vscode.window.activeNotebookEditor;
-  if (!noteEd) {
-    console.log("insertReplyBelow: no notebook editor");
-    return false;
-  }
-  const promptCell = getActiveCell(noteEd);
-  if (!promptCell) {
-    console.log("insertReplyBelow: no active cell");
+  const prompt = choosePrompt();
+  if (!prompt) {
+    console.log("insertReplyBelow: no prompt");
     return false;
   }
 
-  await vscode.commands.executeCommand("notebook.cell.insertMarkdownCellBelow");
-  await vscode.commands.executeCommand("notebook.cell.edit");
+  if (vscode.window.activeNotebookEditor) {
+    await vscode.commands.executeCommand("notebook.cell.insertMarkdownCellBelow");
+    await vscode.commands.executeCommand("notebook.cell.edit");
 
-  const ed = vscode.window.activeTextEditor;
-  if (!ed) {
-    console.log("insertReplyBelow: can't edit new cell");
-    return false;
-  }
-  if (ed.document.getText().length > 0) {
-    console.log("insertReplyBelow: new cell should be empty");
-    return false;
-  }
-
-  const prompt = promptCell.document.getText();
-  if (!await typeBotReply(ed, prompt, {})) {
-    return false;
-  }
-
-  // Remove trailing blank line in reply cell
-  await ed.edit((builder) => {
-    if (ed.document.lineCount < 2) {
-      return;
+    const ed = vscode.window.activeTextEditor;
+    if (!ed) {
+      console.log("insertReplyBelow: can't edit new cell");
+      return false;
     }
-    const last = ed.document.lineAt(ed.document.lineCount - 1);
-    if (!last.isEmptyOrWhitespace) {
-      return;
+    if (ed.document.getText().length > 0) {
+      console.log("insertReplyBelow: new cell should be empty");
+      return false;
     }
-    const prev = ed.document.lineAt(ed.document.lineCount - 2);
-    builder.delete(new vscode.Range(prev.range.end, last.rangeIncludingLineBreak.end));
-  });
- 
-  return await vscode.commands.executeCommand("notebook.cell.insertMarkdownCellBelow");
+
+    if (!await typeBotReply(ed, prompt, {})) {
+      return false;
+    }
+
+    // Remove trailing blank line in reply cell
+    await ed.edit((builder) => {
+      if (ed.document.lineCount < 2) {
+        return;
+      }
+      const last = ed.document.lineAt(ed.document.lineCount - 1);
+      if (!last.isEmptyOrWhitespace) {
+        return;
+      }
+      const prev = ed.document.lineAt(ed.document.lineCount - 2);
+      builder.delete(new vscode.Range(prev.range.end, last.rangeIncludingLineBreak.end));
+    });
+  
+    return await vscode.commands.executeCommand("notebook.cell.insertMarkdownCellBelow");
+  }
+
+  // TODO: non-notebook version
+  return false;
+}
+
+/** Open a new editor tab with the prompt used for the current position. */
+async function showPrompt(): Promise<boolean> {  
+  const prompt = choosePrompt();
+  if (!prompt) {
+    console.log("showPrompt: no prompt to show");
+    return false;
+  }
+
+  const doc = await vscode.workspace.openTextDocument({content: prompt, language: 'plaintext'});
+  await vscode.window.showTextDocument(doc, {viewColumn: vscode.ViewColumn.Beside, preview: true, preserveFocus: true});
+  return true;
 }
 
 const botPattern = /bot:?\s*$/;
@@ -399,6 +427,7 @@ export function activate(context: vscode.ExtensionContext) {
   // commands
   push(vscode.commands.registerCommand("bot-typist.type", typeAsBot));
   push(vscode.commands.registerCommand("bot-typist.insert-reply-below", insertReplyBelow));
+  push(vscode.commands.registerCommand("bot-typist.show-prompt", showPrompt));
 
   push(
     vscode.languages.registerCompletionItemProvider(selector, completion, ":"),

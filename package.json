@@ -37,6 +37,10 @@
       {
         "command": "bot-typist.insert-reply-below",
         "title": "Bot: Insert Reply Below"
+      },
+      {
+        "command": "bot-typist.show-prompt",
+        "title": "Bot: Show Prompt For Position"
       }
     ]
   },
