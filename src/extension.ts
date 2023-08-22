@@ -2,16 +2,11 @@ import * as vscode from "vscode";
 import * as child_process from "child_process";
 import * as util from "util";
 
+import { writerForEditor, writeStdout } from "./io";
+
 const selector: vscode.DocumentSelector = [
   'plaintext', 'markdown'
 ];
-
-const decorationType = vscode.window.createTextEditorDecorationType({
-  after: {
-    contentText: "...",
-    color: "gray",
-  },
-});
 
 function getCommandPath() {
   return vscode.workspace.getConfiguration("bot-typist").get<string>(
@@ -64,136 +59,6 @@ async function checkCommandPath(
   }
 }
 
-/**
- * Types some text into the current document at the cursor.
- * Returns true if the text was typed successfully.
- */
-async function typeText(newText: string): Promise<boolean> {
-  const ed = vscode.window.activeTextEditor;
-  if (!ed) {
-    return false;
-  }
-
-  if (ed.selections.length !== 1 || !ed.selection.isEmpty) {
-    console.log("typeText: selection not empty");
-    return false;
-  }
-
-  const here = ed.selection.active;
-  const edit = new vscode.WorkspaceEdit();
-  edit.insert(ed.document.uri, here, newText);
-
-  if (!await vscode.workspace.applyEdit(edit)) {
-    console.log(`typeText: applyEdit failed for: '${newText}'. Retrying.`);
-    if (!await vscode.workspace.applyEdit(edit)) {
-      console.log(`typeText: applyEdit failed again. Giving up.`);
-      return false;
-    }
-    console.log(`typeText: applyEdit succeeded on second try.`);
-  }
-
-  if (ed.selections.length !== 1 || !ed.selection.isEmpty) {
-    console.log("typeText: selection not empty after edit");
-    return false;
-  }
-
-  const lines = newText.split("\n");
-  const lineDelta = lines.length - 1;
-  const charDelta = lines[lineDelta].length;
-  const newPosition = here.translate(lineDelta, charDelta);
-
-  ed.selection = new vscode.Selection(newPosition, newPosition);
-  return true;
-}
-
-/**
- * Runs a command and types stdout into the editor.
- * Returns true if the command finished without being interrupted.
- */
-function typeOutputToEditor(command: string, args: string[], stdin: string): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    const editor = vscode.window.activeTextEditor;
-    if (!editor) {
-      resolve(false);
-      return;
-    }
-
-    const child = child_process.spawn(command, args);
-    child.stdin.write(stdin, (err) => {
-      if (err) {
-        console.error(`error writing to stdin of llm: ${err}`);
-        child.kill();
-        resolve(false);  
-      }
-    });
-    child.stdin.end();
-
-    let shuttingDown = false;
-    let insertingOutput = false;
-
-    // Handle stdout
-    child.stdout.on("data", async (data) => {
-      if (shuttingDown) {
-        return;
-      }
-
-      child.stdout.pause();
-
-      insertingOutput = true;
-      if (!await typeText(data.toString())) {
-        console.error("typeOutputToEditor: typeText failed, stopping");
-        child.kill();
-        resolve(false);
-      }   
-      insertingOutput = false;
-
-      child.stdout.resume();
-    });
-
-    // Handle errors
-    child.stderr.on("data", (data) => {
-      console.error(`stderr: ${data}`);
-      reject(new Error("External command printed an error while typing"));
-      child.kill();
-    });
-
-    // Attach listeners to detect cursor movement or text change
-    const disposables: vscode.Disposable[] = [];
-
-    disposables.push(vscode.window.onDidChangeTextEditorSelection((e) => {
-      if (e.textEditor === editor && !insertingOutput) {
-        child.kill();
-        shuttingDown = true;
-      }
-    }));
-
-    disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
-      if (e.document === editor.document && !insertingOutput) {
-        child.kill();
-        shuttingDown = true;
-      }
-    }));
-
-    // Cleanup the listeners once the command completes
-    child.on("close", (code, signal) => {
-      for (const disposable of disposables) {
-        disposable.dispose();
-      }
-      if (signal) {
-        console.error(`llm was killed by signal ${signal}`);
-        resolve(false);
-      } else if (code !== 0) {
-        reject(
-          new Error(`External command exited with code ${code} while typing`),
-        );
-      } else {
-        console.log("llm exited normally");
-        resolve(true);
-      }
-    });
-  });
-}
-
 async function typeBotReply(ed: vscode.TextEditor, prompt: string, options?: {prefix?: string, suffix?: string}): Promise<boolean> {
   const path = getCommandPath();
   if (!path || await checkCommandPath(path) !== ConfigState.ok) {
@@ -203,26 +68,25 @@ async function typeBotReply(ed: vscode.TextEditor, prompt: string, options?: {pr
     return false;
   }
 
-  const here = ed.selection.active;
-  ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
+  const out = writerForEditor(ed);
   try {
     const prefix = options?.prefix;
-    if (prefix && !await typeText(prefix)) {
+    if (prefix && !await out.write(prefix)) {
       return false;
     }
 
-    if (!await typeOutputToEditor(path, [], prompt)) {
+    if (!await writeStdout(out, path, [], {stdin: prompt})) {
       return false;
     }
 
     const suffix = options?.suffix;
-    if (suffix && !await typeText(suffix)) {
+    if (suffix && !await out.write(suffix)) {
       return false;
     }
 
     return true;
   } finally {
-    ed.setDecorations(decorationType, []);
+    out.end();
   }
 }
 
