@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import * as child_process from "child_process";
 import * as util from "util";
 
-import { writerForEditor, writeStdout } from "./stream";
-import { getActiveCell } from "./notebook";
+import { Writer, writerForEditor, writeStdout } from "./stream";
+import { getActiveCell, writerForNotebook } from "./notebook";
 
 const selector: vscode.DocumentSelector = [
   'plaintext', 'markdown'
@@ -60,7 +60,7 @@ async function checkCommandPath(
   }
 }
 
-async function typeBotReply(ed: vscode.TextEditor, prompt: string, options?: {prefix?: string, suffix?: string}): Promise<boolean> {
+async function typeBotReply(out: Writer, prompt: string, options?: {prefix?: string, suffix?: string}): Promise<boolean> {
   const path = getCommandPath();
   if (!path || await checkCommandPath(path) !== ConfigState.ok) {
     showConfigError(
@@ -69,26 +69,21 @@ async function typeBotReply(ed: vscode.TextEditor, prompt: string, options?: {pr
     return false;
   }
 
-  const out = writerForEditor(ed);
-  try {
-    const prefix = options?.prefix;
-    if (prefix && !await out.write(prefix)) {
-      return false;
-    }
-
-    if (!await writeStdout(out, path, [], {stdin: prompt})) {
-      return false;
-    }
-
-    const suffix = options?.suffix;
-    if (suffix && !await out.write(suffix)) {
-      return false;
-    }
-
-    return true;
-  } finally {
-    out.end();
+  const prefix = options?.prefix;
+  if (prefix && !await out.write(prefix)) {
+    return false;
   }
+
+  if (!await writeStdout(out, path, [], {stdin: prompt})) {
+    return false;
+  }
+
+  const suffix = options?.suffix;
+  if (suffix && !await out.write(suffix)) {
+    return false;
+  }
+
+  return true;
 }
 
 function showConfigError(msg: string) {
@@ -188,7 +183,12 @@ async function typeAsBot() {
   }
   console.log(`prefix: '${prefix}'`);
 
-  await typeBotReply(ed, prompt, {prefix, suffix: '\n'});
+  const writer = writerForEditor(ed);
+  try {
+    await typeBotReply(writer, prompt, {prefix, suffix: '\n'});
+  } finally {
+    writer.end();
+  } 
 }
 
 /** If in a notebook cell, insert a new markdown cell with the bot's reply. */
@@ -199,38 +199,40 @@ async function insertReplyBelow(): Promise<boolean> {
     return false;
   }
 
+  const path = getCommandPath();
+  if (!path || await checkCommandPath(path) !== ConfigState.ok) {
+    showConfigError(
+      `Can't run llm command. Check that bot-typist.llm.path is set correctly in settings.`,
+    );
+    return false;
+  }
+
   if (vscode.window.activeNotebookEditor) {
-    await vscode.commands.executeCommand("notebook.cell.insertMarkdownCellBelow");
-    await vscode.commands.executeCommand("notebook.cell.edit");
-
-    const ed = vscode.window.activeTextEditor;
-    if (!ed) {
-      console.log("insertReplyBelow: can't edit new cell");
-      return false;
-    }
-    if (ed.document.getText().length > 0) {
-      console.log("insertReplyBelow: new cell should be empty");
+    const writer = writerForNotebook();
+    if (!writer) {
+      console.log("insertReplyBelow: no notebook writer");
       return false;
     }
 
-    if (!await typeBotReply(ed, prompt, {})) {
-      return false;
-    }
-
-    // Remove trailing blank line in reply cell
-    await ed.edit((builder) => {
-      if (ed.document.lineCount < 2) {
-        return;
+    try {
+      if (!await writer.startMarkdownCell()) {
+        console.log("insertReplyBelow: couldn't create markdown cell for reply");
+        return false;
       }
-      const last = ed.document.lineAt(ed.document.lineCount - 1);
-      if (!last.isEmptyOrWhitespace) {
-        return;
+
+      if (!await writeStdout(writer, path, [], {stdin: prompt})) {
+        return false;
       }
-      const prev = ed.document.lineAt(ed.document.lineCount - 2);
-      builder.delete(new vscode.Range(prev.range.end, last.rangeIncludingLineBreak.end));
-    });
-  
-    return await vscode.commands.executeCommand("notebook.cell.insertMarkdownCellBelow");
+
+      if (!await writer.startMarkdownCell()) {
+        console.log("insertReplyBelow: couldn't create markdown cell after reply");
+        return false;
+      }
+    } finally {
+      writer.end();
+    }
+
+    return true;    
   }
 
   // TODO: non-notebook version

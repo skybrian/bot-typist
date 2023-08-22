@@ -217,6 +217,7 @@ export async function typeText(ed: vscode.TextEditor, newText: string): Promise<
 /**
  * Runs a command and sends stdout to a Writer.
  * Returns true if the command finished without being interrupted.
+ * Doesn't close the writer.
  */
 export function writeStdout(dest: Writer, command: string, args: string[], options?: {stdin?: string}): Promise<boolean> {
   return new Promise((resolve, reject) => {
@@ -228,7 +229,6 @@ export function writeStdout(dest: Writer, command: string, args: string[], optio
     const cleanup = () => {
       shuttingDown = true;
       child.kill();
-      dest.end();
     };
 
     // Send stdin

@@ -30,7 +30,7 @@ describe("writerForEditor", () => {
 
   it("writes to the text editor", async function () {
     const edit = "Next line\n";
-    assert.ok(await this.writer.write(edit));
+    assert.ok(await this.writer.write(edit), "write failed");
     assert.strictEqual(this.doc.getText(), "First line\nNext line\n");
   });
 
