@@ -2,7 +2,8 @@ import * as vscode from "vscode";
 import * as child_process from "child_process";
 import * as util from "util";
 
-import { writerForEditor, writeStdout } from "./io";
+import { writerForEditor, writeStdout } from "./stream";
+import { getActiveCell } from "./notebook";
 
 const selector: vscode.DocumentSelector = [
   'plaintext', 'markdown'
@@ -116,18 +117,6 @@ function choosePromptStart(ed: vscode.TextEditor, endLine: number): vscode.Posit
     }
   }
   return new vscode.Position(0, 0);
-}
-
-function getActiveCell(): vscode.NotebookCell | undefined {
-  const ed = vscode.window.activeNotebookEditor;
-  if (!ed) {
-    return undefined;
-  }
-  const sel = ed.selection;
-  if (sel.end - sel.start !== 1) {
-    return undefined;
-  }
-  return ed.notebook.cellAt(sel.start);
 }
 
 function choosePrompt(): string | undefined {

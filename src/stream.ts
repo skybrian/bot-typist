@@ -1,20 +1,110 @@
 import * as vscode from "vscode";
 import * as child_process from "child_process";
 
+import { Completer } from "./async";
+
+export const CANCEL = Symbol("CANCEL");
+export const DONE = Symbol("END");
+
+export type ReadResult = string | typeof CANCEL | typeof DONE;
+
+export interface Reader {
+  /**
+   * Reads a chunk from a source. Blocks until available or cancelled.
+   */
+  read(): Promise<ReadResult>;
+
+  /**
+   * Signals that no more data will be read and resources can be cleaned up.
+   */
+  cancel(): void;
+}
+
 export interface Writer {
   /**
-   * Writes a string to a destination. Blocks until finished.
+   * Writes a string to some destination. Blocks until the data is handed off.
    *
-   * Returns false if writing has finished or has been cancelled.
+   * Returns false if writing has been cancelled.
    */
   write(data: string): Promise<boolean>;
 
   /**
    * Signals that no more data will be written and resources can be cleaned up.
    * 
-   * Returns false if writing has been cancelled.
+   * Returns true if the overall write operation succeeded, including all previous writes.
    */
   end(): Promise<boolean>;
+}
+
+/**
+ * Returns a Reader and Writer that are connected to each other.
+ * There is no buffering; writes will block until the reader is ready.
+ */
+export function makePipe(): [Reader, Writer] {
+
+  let readerWaiting = new Completer<boolean>();
+  let nextRead = new Completer<ReadResult>();
+
+  let isReading = false;
+  let done = false;
+
+  const reader: Reader = {
+    read: async (): Promise<ReadResult> => {
+      if (isReading) {
+        throw new Error("Already reading");
+      } else if (done) {
+        return nextRead.promise;
+      }
+
+      isReading = true;
+      readerWaiting.resolve(true);
+      try {
+        const chunk = await nextRead.promise;
+        nextRead = new Completer<ReadResult>();
+        return chunk;
+      } finally {
+        isReading = false;
+      }
+    },
+
+    cancel: function (): void {
+      readerWaiting.resolve(false);
+      nextRead.resolve(CANCEL);
+      done = true;
+    }
+  };
+
+  let sending = false;
+
+  const send = async (data: ReadResult): Promise<boolean> => {
+    if (sending) {
+      throw new Error("Already writing");
+    }
+
+    sending = true;
+    try {
+      if (!await readerWaiting.promise) {
+        return false; // cancelled
+      }
+      readerWaiting = new Completer<boolean>();
+      nextRead.resolve(data);
+      return true;
+    } finally {
+      sending = false;
+    }
+  };
+
+  const writer: Writer = {
+    write: async (data: string): Promise<boolean> => {
+      return send(data);
+    },
+
+    end: function (): Promise<boolean> {
+      return send(DONE);
+    }
+  };
+
+  return [reader, writer];
 }
 
 /**

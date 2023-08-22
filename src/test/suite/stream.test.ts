@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { Writer, writerForEditor, writeStdout } from "../../io";
+import { Writer, writerForEditor, writeStdout, makePipe, DONE } from "../../stream";
 
 export class StringWriter implements Writer {
   buf = "";
@@ -58,5 +58,45 @@ describe("writeStdout", () => {
     const buf = new StringWriter();
     assert.ok(await writeStdout(buf, "cat", [], { stdin: "Hello, world!" }));
     assert.strictEqual(buf.buf, "Hello, world!");
+  });
+});
+
+describe("makePipe", () => {
+  it("works when there's no data to send", async () => {
+    const [reader, writer] = makePipe();
+    const end = writer.end();
+    assert.strictEqual(await reader.read(), DONE);
+    assert.ok(await end);
+  });
+
+  it("works when immediately cancelled", async () => {
+    const [reader, writer] = makePipe();
+    const end = writer.end();
+    reader.cancel();
+    assert.equal(await end, false);
+  });
+
+
+  it("works for one write", async () => {
+    const [reader, writer] = makePipe();
+    
+    const write = writer.write("hello!");
+    assert.strictEqual(await reader.read(), "hello!");
+    assert.ok(await write);
+
+    const end = writer.end();
+    assert.strictEqual(await reader.read(), DONE);
+    assert.ok(await end);
+  });
+
+  it("works when cancelled after one write", async () => {
+    const [reader, writer] = makePipe();
+    
+    const write = writer.write("hello!");
+    assert.strictEqual(await reader.read(), "hello!");
+    assert.ok(await write);
+
+    reader.cancel();
+    assert.equal(await writer.end(), false);
   });
 });
