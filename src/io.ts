@@ -17,19 +17,6 @@ export interface Writer {
   end(): Promise<boolean>;
 }
 
-export class StringWriter implements Writer {
-  buf = "";
-
-  public async write(data: string): Promise<boolean> {
-    this.buf += data;
-    return true;
-  }
-
-  public async end(): Promise<boolean> {
-    return true;
-  }
-}
-
 /**
  * Returns a Writer that writes to an editor at the current cursor position.
  * 

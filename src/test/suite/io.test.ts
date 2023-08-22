@@ -1,38 +1,62 @@
-import * as assert from 'assert';
-import * as vscode from 'vscode';
-import { StringWriter, Writer, writerForEditor, writeStdout } from '../../io';
+import * as assert from "assert";
+import * as vscode from "vscode";
+import { Writer, writerForEditor, writeStdout } from "../../io";
 
-test('write to text editor', async () => {
-    const doc = await vscode.workspace.openTextDocument({
-        language: "plaintext",
-        content: "First line\n",
+export class StringWriter implements Writer {
+  buf = "";
+
+  public async write(data: string): Promise<boolean> {
+    this.buf += data;
+    return true;
+  }
+
+  public async end(): Promise<boolean> {
+    return true;
+  }
+}
+
+describe("writerForEditor", () => {
+  before(async function () {
+    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+
+    this.doc = await vscode.workspace.openTextDocument({
+      language: "plaintext",
+      content: "First line\n",
     });
-    const ed = await vscode.window.showTextDocument(doc);
-    ed.selection = new vscode.Selection(1, 0, 1, 0);
+    this.ed = await vscode.window.showTextDocument(this.doc);
+    this.ed.selection = new vscode.Selection(1, 0, 1, 0);
+    this.writer = writerForEditor(this.ed);
+  });
 
-    const writer: Writer = writerForEditor(ed);
+  it("writes to the text editor", async function () {
     const edit = "Next line\n";
-    
-    assert.ok(await writer.write(edit));
+    assert.ok(await this.writer.write(edit));
+    assert.strictEqual(this.doc.getText(), "First line\nNext line\n");
+  });
 
-    assert.strictEqual(doc.getText(), "First line\nNext line\n");
-    assert.strictEqual(ed.selection.active.line, 2);
-    assert.strictEqual(ed.selection.active.character, 0);
+  it("moves the cursor", function () {
+    assert.strictEqual(this.ed.selection.active.line, 2);
+    assert.strictEqual(this.ed.selection.active.character, 0);
+  });
 
-    assert.ok(await writer.end());
+  it("doesn't change the document or move the cursor when end is called", async function () {
+    assert.ok(await this.writer.end());
 
-    assert.strictEqual(doc.getText(), "First line\nNext line\n");
-    assert.strictEqual(ed.selection.active.line, 2);
-    assert.strictEqual(ed.selection.active.character, 0);
+    assert.strictEqual(this.doc.getText(), "First line\nNext line\n");
+    assert.strictEqual(this.ed.selection.active.line, 2);
+    assert.strictEqual(this.ed.selection.active.character, 0);
+  });
 });
 
-test('run a command', async () => {
+describe("writeStdout", () => {
+  it("writes a command's output to the writer", async () => {
     const buf = new StringWriter();
     assert.ok(await writeStdout(buf, "echo", ["Hello, world!"]));
-});
+  });
 
-test('run a command with input', async () => {
+  it("runs a command that takes input on stdin", async () => {
     const buf = new StringWriter();
-    assert.ok(await writeStdout(buf, "cat", [], {stdin: "Hello, world!"}));
+    assert.ok(await writeStdout(buf, "cat", [], { stdin: "Hello, world!" }));
     assert.strictEqual(buf.buf, "Hello, world!");
+  });
 });
