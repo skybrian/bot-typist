@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { Writer, typeText } from "./stream";
+import { WriteCloser, typeText } from "./stream";
 
-interface CellWriter extends Writer {
+interface CellWriter extends WriteCloser {
   startCodeCell(): Promise<boolean>;
   startMarkdownCell(): Promise<boolean>;
 }
@@ -130,7 +130,7 @@ export function writerForNotebook(): CellWriter | undefined {
       }
     },
 
-    end: async (): Promise<boolean> => {
+    close: async (): Promise<boolean> => {
       cleanup();
       return !cancelled;
     },

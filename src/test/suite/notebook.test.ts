@@ -65,40 +65,48 @@ describe("writerForNotebook", () => {
     this.ed = ed;
   });
 
-  it("creates a writer when a notebook cell is active", async function () {
+  it("creates a writer for an active notebook cell", async function () {
     const w = writerForNotebook();
     assert.ok(w);
     assert.ok(w.write);
     this.writer = w;
   });
 
-  it("writes to the text editor", async function () {
-    const edit = "Next line\n";
-    assert.ok(await this.writer.write(edit), "write failed");
-    checkCells(["First line\nNext line\n"]);
+  describe("write", () => {
+    it("writes to the text editor", async function () {
+      const edit = "Next line\n";
+      assert.ok(await this.writer.write(edit), "write failed");
+      checkCells(["First line\nNext line\n"]);
+    });
+  
+    it("moves the cursor", function () {
+      checkCursor(0, 2, 0);
+    });
   });
 
-  it("moves the cursor", function () {
-    checkCursor(0, 2, 0);
+  describe("startMarkdownCell", () => {
+    it("appends a markdown cell", async function () {
+      assert.ok(await this.writer.startMarkdownCell());
+      checkCells(["First line\nNext line", ""]);
+      checkCursor(1, 0, 0);
+    });  
   });
 
-  it("appends a markdown cell", async function () {
-    assert.ok(await this.writer.startMarkdownCell());
-    checkCells(["First line\nNext line", ""]);
-    checkCursor(1, 0, 0);
+  describe("write", () => {
+    it("writes to the new cell", async function () {
+      const edit = "Cell 2\n";
+      assert.ok(await this.writer.write(edit));
+      checkCells(["First line\nNext line", "Cell 2\n"]);
+      checkCellKinds([vscode.NotebookCellKind.Code, vscode.NotebookCellKind.Markup]);
+      checkCursor(1, 1, 0);
+    });
   });
 
-  it("writes to the new cell", async function () {
-    const edit = "Cell 2\n";
-    assert.ok(await this.writer.write(edit));
-    checkCells(["First line\nNext line", "Cell 2\n"]);
-    checkCellKinds([vscode.NotebookCellKind.Code, vscode.NotebookCellKind.Markup]);
-    checkCursor(1, 1, 0);
-  });
-
-  it("end doesn't change the cells or cursor", async function () {
-    assert.ok(await this.writer.end());
-    checkCells(["First line\nNext line", "Cell 2\n"]);
-    checkCursor(1, 1, 0);
+  describe("close", () => {
+    it("close doesn't change the cells or cursor", async function () {
+      assert.ok(await this.writer.close());
+      checkCells(["First line\nNext line", "Cell 2\n"]);
+      checkCursor(1, 1, 0);
+    });
   });
 });

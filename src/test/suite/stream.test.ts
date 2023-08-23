@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { Writer, EditorWriter, writeStdout, makePipe, DONE } from "../../lib/stream";
+import { Writer, TextEditorWriter, writeStdout, makePipe, DONE } from "../../lib/stream";
 
 export class StringWriter implements Writer {
   buf = "";
@@ -25,7 +25,7 @@ describe("EditorWriter", () => {
     });
     this.ed = await vscode.window.showTextDocument(this.doc);
     this.ed.selection = new vscode.Selection(1, 0, 1, 0);
-    this.writer = new EditorWriter(this.ed);
+    this.writer = new TextEditorWriter(this.ed);
   });
 
   describe("write", () => {
@@ -40,9 +40,9 @@ describe("EditorWriter", () => {
     });
   });
 
-  describe("dispose", () => {
+  describe("close", () => {
     it("doesn't modify the document or move the cursor", async function () {
-      await this.writer.dispose();
+      await this.writer.close();
   
       assert.strictEqual(this.doc.getText(), "First line\nNext line\n");
       assert.strictEqual(this.ed.selection.active.line, 2);
@@ -67,14 +67,14 @@ describe("writeStdout", () => {
 describe("makePipe", () => {
   it("works when there's no data to send", async () => {
     const [reader, writer] = makePipe();
-    const end = writer.end();
+    const end = writer.close();
     assert.strictEqual(await reader.read(), DONE);
     assert.ok(await end);
   });
 
   it("works when immediately cancelled", async () => {
     const [reader, writer] = makePipe();
-    const end = writer.end();
+    const end = writer.close();
     reader.cancel();
     assert.equal(await end, false);
   });
@@ -87,7 +87,7 @@ describe("makePipe", () => {
     assert.strictEqual(await reader.read(), "hello!");
     assert.ok(await write);
 
-    const end = writer.end();
+    const end = writer.close();
     assert.strictEqual(await reader.read(), DONE);
     assert.ok(await end);
   });
@@ -100,6 +100,6 @@ describe("makePipe", () => {
     assert.ok(await write);
 
     reader.cancel();
-    assert.equal(await writer.end(), false);
+    assert.equal(await writer.close(), false);
   });
 });

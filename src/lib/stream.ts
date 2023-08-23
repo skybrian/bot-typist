@@ -3,14 +3,15 @@ import * as child_process from "child_process";
 
 import { Completer } from "./async";
 
-export const CANCEL = Symbol("CANCEL");
-export const DONE = Symbol("END");
+export const DONE = Symbol("DONE");
 
-export type ReadResult = string | typeof CANCEL | typeof DONE;
+export type ReadResult = string | typeof DONE;
 
 export interface Reader {
   /**
-   * Reads a chunk from a source. Blocks until available or cancelled.
+   * Reads a chunk from a source. Blocks until a chunk is available 
+   * 
+   * @returns a chunk or DONE if no more data is available.
    */
   read(): Promise<ReadResult>;
 
@@ -27,21 +28,22 @@ export interface Writer {
    * Returns false if writing has been cancelled.
    */
   write(data: string): Promise<boolean>;
+}
 
+export interface WriteCloser extends Writer {
   /**
    * Signals that no more data will be written and resources can be cleaned up.
    * 
-   * Returns true if the overall write operation succeeded, including all previous writes.
+   * @returns false if any writes were cancelled.
    */
-  end(): Promise<boolean>;
+  close(): Promise<boolean>;
 }
 
 /**
  * Returns a Reader and Writer that are connected to each other.
  * There is no buffering; writes will block until the reader is ready.
  */
-export function makePipe(): [Reader, Writer] {
-
+export function makePipe(): [Reader, WriteCloser] {
   let readerWaiting = new Completer<boolean>();
   let nextRead = new Completer<ReadResult>();
 
@@ -69,9 +71,9 @@ export function makePipe(): [Reader, Writer] {
 
     cancel: function (): void {
       readerWaiting.resolve(false);
-      nextRead.resolve(CANCEL);
+      nextRead.resolve(DONE);
       done = true;
-    }
+    },
   };
 
   let sending = false;
@@ -94,32 +96,25 @@ export function makePipe(): [Reader, Writer] {
     }
   };
 
-  const writer: Writer = {
+  const writer: WriteCloser = {
     write: async (data: string): Promise<boolean> => {
       return send(data);
     },
 
-    end: function (): Promise<boolean> {
+    close: function (): Promise<boolean> {
       return send(DONE);
-    }
+    },
   };
 
   return [reader, writer];
 }
 
-const decorationType = vscode.window.createTextEditorDecorationType({
-  after: {
-    contentText: "...",
-    color: "gray",
-  },
-});
-
 /**
- * Returns a Writer that writes to an editor at the current cursor position.
- * 
+ * Writes to a text editor at the current cursor position.
+ *
  * Writing will be cancelled if the cursor moves or the document is edited.
  */
-export class EditorWriter implements Writer, vscode.Disposable {
+export class TextEditorWriter implements WriteCloser {
   private readonly ed: vscode.TextEditor;
 
   private readonly disposables: vscode.Disposable[] = [];
@@ -135,15 +130,29 @@ export class EditorWriter implements Writer, vscode.Disposable {
         this.cancelled = true;
       }
     }));
-  
+
     this.disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
       if (e.document === ed.document && !this.insertingOutput) {
         this.cancelled = true;
       }
     }));
 
+    const decorationType = vscode.window.createTextEditorDecorationType({
+      after: {
+        contentText: "...",
+        color: "gray",
+      },
+    });
+
     const here = ed.selection.active;
-    ed.setDecorations(decorationType, [new vscode.Range(here, here)]);  
+    ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
+
+    this.disposables.push({
+      dispose: () => {
+        this.ed.setDecorations(decorationType, []);
+        decorationType.dispose();
+      },
+    });
   }
 
   async write(data: string): Promise<boolean> {
@@ -159,21 +168,17 @@ export class EditorWriter implements Writer, vscode.Disposable {
     } finally {
       this.insertingOutput = false;
       if (this.cancelled) {
-        this.dispose();
+        this.close();
       }
     }
   }
 
-  dispose(): void {
-    this.ed.setDecorations(decorationType, []);
+  async close(): Promise<boolean> {
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
     this.disposables.length = 0;
-  }
-
-  async end(): Promise<boolean> {
-    throw new Error("going away");
+    return !this.cancelled;
   }
 }
 
@@ -181,7 +186,10 @@ export class EditorWriter implements Writer, vscode.Disposable {
  * Types some text into the current document at the cursor.
  * Returns true if the text was typed successfully.
  */
-export async function typeText(ed: vscode.TextEditor, newText: string): Promise<boolean> {
+export async function typeText(
+  ed: vscode.TextEditor,
+  newText: string,
+): Promise<boolean> {
   if (ed.selections.length !== 1 || !ed.selection.isEmpty) {
     console.log("typeText: selection not empty");
     return false;
@@ -215,13 +223,17 @@ export async function typeText(ed: vscode.TextEditor, newText: string): Promise<
 }
 
 /**
- * Runs a command and sends stdout to a Writer.
+ * Runs an external command and sends stdout to a Writer.
  * Returns true if the command finished without being interrupted.
  * Doesn't close the writer.
  */
-export function writeStdout(dest: Writer, command: string, args: string[], options?: {stdin?: string}): Promise<boolean> {
+export function writeStdout(
+  dest: Writer,
+  command: string,
+  args: string[],
+  options?: { stdin?: string },
+): Promise<boolean> {
   return new Promise((resolve, reject) => {
-
     const child = child_process.spawn(command, args);
 
     let shuttingDown = false;
@@ -235,9 +247,11 @@ export function writeStdout(dest: Writer, command: string, args: string[], optio
     if (options && options.stdin) {
       child.stdin.write(options.stdin, (err) => {
         if (err) {
-          console.error(`writeStdout: error writing to stdin of external command: ${err}`);
+          console.error(
+            `writeStdout: error writing to stdin of external command: ${err}`,
+          );
           cleanup();
-          resolve(false);  
+          resolve(false);
         }
       });
       child.stdin.end();
@@ -255,7 +269,7 @@ export function writeStdout(dest: Writer, command: string, args: string[], optio
         console.error("External command cancelled");
         cleanup();
         resolve(false);
-      }   
+      }
 
       child.stdout.resume();
     });

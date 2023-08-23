@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as child_process from "child_process";
 import * as util from "util";
 
-import { Writer, EditorWriter, writeStdout } from "./lib/stream";
+import { Writer, TextEditorWriter, writeStdout } from "./lib/stream";
 import { getActiveCell, writerForNotebook } from "./lib/notebook";
 
 const selector: vscode.DocumentSelector = [
@@ -183,11 +183,11 @@ async function typeAsBot() {
   }
   console.log(`prefix: '${prefix}'`);
 
-  const writer = new EditorWriter(ed);
+  const writer = new TextEditorWriter(ed);
   try {
     await typeBotReply(writer, prompt, {prefix, suffix: '\n'});
   } finally {
-    writer.dispose();
+    await writer.close();
   } 
 }
 
@@ -229,7 +229,7 @@ async function insertReplyBelow(): Promise<boolean> {
         return false;
       }
     } finally {
-      writer.end();
+      await writer.close();
     }
 
     return true;    
