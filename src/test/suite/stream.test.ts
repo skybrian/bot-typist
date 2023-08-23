@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { Writer, writerForEditor, writeStdout, makePipe, DONE } from "../../stream";
+import { Writer, EditorWriter, writeStdout, makePipe, DONE } from "../../lib/stream";
 
 export class StringWriter implements Writer {
   buf = "";
@@ -15,7 +15,7 @@ export class StringWriter implements Writer {
   }
 }
 
-describe("writerForEditor", () => {
+describe("EditorWriter", () => {
   before(async function () {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
 
@@ -25,26 +25,29 @@ describe("writerForEditor", () => {
     });
     this.ed = await vscode.window.showTextDocument(this.doc);
     this.ed.selection = new vscode.Selection(1, 0, 1, 0);
-    this.writer = writerForEditor(this.ed);
+    this.writer = new EditorWriter(this.ed);
   });
 
-  it("writes to the text editor", async function () {
-    const edit = "Next line\n";
-    assert.ok(await this.writer.write(edit), "write failed");
-    assert.strictEqual(this.doc.getText(), "First line\nNext line\n");
+  describe("write", () => {
+    it("writes to the text editor", async function () {
+      assert.ok(await this.writer.write("Next line\n"), "write failed");
+      assert.strictEqual(this.doc.getText(), "First line\nNext line\n");
+    });
+  
+    it("moves the cursor", function () {
+      assert.strictEqual(this.ed.selection.active.line, 2);
+      assert.strictEqual(this.ed.selection.active.character, 0);
+    });
   });
 
-  it("moves the cursor", function () {
-    assert.strictEqual(this.ed.selection.active.line, 2);
-    assert.strictEqual(this.ed.selection.active.character, 0);
-  });
-
-  it("doesn't change the document or move the cursor when end is called", async function () {
-    assert.ok(await this.writer.end());
-
-    assert.strictEqual(this.doc.getText(), "First line\nNext line\n");
-    assert.strictEqual(this.ed.selection.active.line, 2);
-    assert.strictEqual(this.ed.selection.active.character, 0);
+  describe("dispose", () => {
+    it("doesn't modify the document or move the cursor", async function () {
+      await this.writer.dispose();
+  
+      assert.strictEqual(this.doc.getText(), "First line\nNext line\n");
+      assert.strictEqual(this.ed.selection.active.line, 2);
+      assert.strictEqual(this.ed.selection.active.character, 0);
+    });  
   });
 });
 

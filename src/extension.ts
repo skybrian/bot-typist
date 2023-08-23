@@ -2,8 +2,8 @@ import * as vscode from "vscode";
 import * as child_process from "child_process";
 import * as util from "util";
 
-import { Writer, writerForEditor, writeStdout } from "./stream";
-import { getActiveCell, writerForNotebook } from "./notebook";
+import { Writer, EditorWriter, writeStdout } from "./lib/stream";
+import { getActiveCell, writerForNotebook } from "./lib/notebook";
 
 const selector: vscode.DocumentSelector = [
   'plaintext', 'markdown'
@@ -183,11 +183,11 @@ async function typeAsBot() {
   }
   console.log(`prefix: '${prefix}'`);
 
-  const writer = writerForEditor(ed);
+  const writer = new EditorWriter(ed);
   try {
     await typeBotReply(writer, prompt, {prefix, suffix: '\n'});
   } finally {
-    writer.end();
+    writer.dispose();
   } 
 }
 

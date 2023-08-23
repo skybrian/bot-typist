@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
-import { writerForNotebook } from "../../notebook";
+import { writerForNotebook } from "../../lib/notebook";
 
 function checkCells(expectedCells: string[]) {
   const noteEd = vscode.window.activeNotebookEditor;

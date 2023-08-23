@@ -107,74 +107,74 @@ export function makePipe(): [Reader, Writer] {
   return [reader, writer];
 }
 
+const decorationType = vscode.window.createTextEditorDecorationType({
+  after: {
+    contentText: "...",
+    color: "gray",
+  },
+});
+
 /**
  * Returns a Writer that writes to an editor at the current cursor position.
  * 
  * Writing will be cancelled if the cursor moves or the document is edited.
  */
-export function writerForEditor(ed: vscode.TextEditor): Writer {
+export class EditorWriter implements Writer, vscode.Disposable {
+  private readonly ed: vscode.TextEditor;
 
-  var insertingOutput = false;
-  var cancelled = false;
+  private readonly disposables: vscode.Disposable[] = [];
 
-  // Attach listeners to detect cursor movement or text change
-  const disposables: vscode.Disposable[] = [];
+  private insertingOutput = false;
+  private cancelled = false;
 
-  disposables.push(vscode.window.onDidChangeTextEditorSelection((e) => {
-    if (e.textEditor === ed && !insertingOutput) {
-      cancelled = true;
-    }
-  }));
+  constructor(ed: vscode.TextEditor) {
+    this.ed = ed;
 
-  disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
-    if (e.document === ed.document && !insertingOutput) {
-      cancelled = true;
-    }
-  }));
-
-  const decorationType = vscode.window.createTextEditorDecorationType({
-    after: {
-      contentText: "...",
-      color: "gray",
-    },
-  });
+    this.disposables.push(vscode.window.onDidChangeTextEditorSelection((e) => {
+      if (e.textEditor === ed && !this.insertingOutput) {
+        this.cancelled = true;
+      }
+    }));
   
-  const here = ed.selection.active;
-  ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
+    this.disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.document === ed.document && !this.insertingOutput) {
+        this.cancelled = true;
+      }
+    }));
 
-  const cleanup = () => {
-    ed.setDecorations(decorationType, []);
-    decorationType.dispose();
-    for (const disposable of disposables) {
+    const here = ed.selection.active;
+    ed.setDecorations(decorationType, [new vscode.Range(here, here)]);  
+  }
+
+  async write(data: string): Promise<boolean> {
+    if (this.disposables.length === 0) {
+      return false;
+    }
+
+    this.insertingOutput = true;
+    try {
+      const ok = await typeText(this.ed, data);
+      this.cancelled = this.cancelled || !ok;
+      return !this.cancelled;
+    } finally {
+      this.insertingOutput = false;
+      if (this.cancelled) {
+        this.dispose();
+      }
+    }
+  }
+
+  dispose(): void {
+    this.ed.setDecorations(decorationType, []);
+    for (const disposable of this.disposables) {
       disposable.dispose();
     }
-    disposables.length = 0;
-  };
+    this.disposables.length = 0;
+  }
 
-  return {
-    write: async (data: string): Promise<boolean> => {
-      if (cancelled || disposables.length === 0) {
-        return false;
-      }
-
-      insertingOutput = true;
-      try {
-        const ok = await typeText(ed, data);
-        cancelled = cancelled || !ok;
-        return !cancelled;
-      } finally {
-        insertingOutput = false;
-        if (cancelled) {
-          cleanup();
-        }
-      }
-    },
-
-    end: async (): Promise<boolean> => {
-      cleanup();
-      return !cancelled;
-    },
-  };
+  async end(): Promise<boolean> {
+    throw new Error("going away");
+  }
 }
 
 /**
