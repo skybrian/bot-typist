@@ -128,7 +128,7 @@ export function getActiveCell(): vscode.NotebookCell | undefined {
 }
 
 /** Returns a writer that appends cells to the active notebook. */
-export function writerForNotebook(): CellWriter | undefined {
+export function writerForNotebook(): NotebookWriter | undefined {
 
   let cell = getActiveCell();
   if (!cell) {
@@ -140,121 +140,140 @@ export function writerForNotebook(): CellWriter | undefined {
   }
   let ed = vscode.window.activeTextEditor;
 
-  var cancelled = false;
+  return new NotebookWriter(cell, ed);
+}
 
-  // Attach listeners to detect cursor movement or text change
-  const disposables: vscode.Disposable[] = [];
+class NotebookWriter implements CellWriter {
+  #cell: vscode.NotebookCell; 
+  #ed: vscode.TextEditor;
 
-  const decorationType = vscode.window.createTextEditorDecorationType({
+  #cancelled = false;
+  #disposables: vscode.Disposable[] = [];
+
+  #decorationType = vscode.window.createTextEditorDecorationType({
     after: {
       contentText: "...",
       color: "gray",
     },
   });
 
-  const here = ed.selection.active;
-  ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
+  constructor(cell: vscode.NotebookCell, ed: vscode.TextEditor) {
+    this.#cell = cell;
+    this.#ed = ed;
 
-  disposables.push({
-    dispose: () => {
-      ed.setDecorations(decorationType, []);
-      decorationType.dispose();
-    }
-  });
+    const here = ed.selection.active;
+    ed.setDecorations(this.#decorationType, [new vscode.Range(here, here)]);
 
-  const cleanup = () => {
-    for (const disposable of disposables) {
+    this.#disposables.push({
+      dispose: () => {
+        ed.setDecorations(this.#decorationType, []);
+        this.#decorationType.dispose();
+      }
+    });
+  }
+
+  private cleanup = () => {
+    for (const disposable of this.#disposables) {
       disposable.dispose();
     }
-    disposables.length = 0;
+    this.#disposables.length = 0;
   };
 
-  const checkDone = () => {
-    if (disposables.length === 0) {
+  private checkDone = () => {
+    if (this.#disposables.length === 0) {
       return true;
     }
 
-    if (ed !== vscode.window.activeTextEditor) {
+    if (this.#ed !== vscode.window.activeTextEditor) {
       console.log("Active editor changed. Cancelling.");
-      cancelled = true;
-    } else if (getActiveCell() !== cell) {
+      this.#cancelled = true;
+    } else if (getActiveCell() !== this.#cell) {
       console.log("Active cell changed. Cancelling.");
-      cancelled = true;
+      this.#cancelled = true;
     }
 
-    if (cancelled) {
-      cleanup();
+    if (this.#cancelled) {
+      this.cleanup();
     }
-    return disposables.length === 0;
+    return this.#disposables.length === 0;
   };
 
-  let cellStarted = false;
+  private cellStarted = false;
 
-  const startCell = async (command: string): Promise<boolean> => {
-    if (checkDone()) {
+  private startCell = async (command: string): Promise<boolean> => {
+    if (this.checkDone()) {
       return false;
     }
 
     // Remove trailing blank line in previous cell
-    await ed.edit((builder) => {
-      if (ed.document.lineCount < 2) {
+    await this.#ed.edit((builder) => {
+      if (this.#ed.document.lineCount < 2) {
         return;
       }
-      const last = ed.document.lineAt(ed.document.lineCount - 1);
+      const last = this.#ed.document.lineAt(this.#ed.document.lineCount - 1);
       if (!last.isEmptyOrWhitespace) {
         return;
       }
-      const prev = ed.document.lineAt(ed.document.lineCount - 2);
+      const prev = this.#ed.document.lineAt(this.#ed.document.lineCount - 2);
       builder.delete(new vscode.Range(prev.range.end, last.rangeIncludingLineBreak.end));
     });
 
-    ed.setDecorations(decorationType, []);
+    this.#ed.setDecorations(this.#decorationType, []);
 
     await vscode.commands.executeCommand(command);
     await vscode.commands.executeCommand("notebook.cell.edit");
-    cell = getActiveCell();
 
-    ed = vscode.window.activeTextEditor!;
-    const here = ed.selection.active;
-    ed.selection = new vscode.Selection(here, here);
-    ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
+    const cell = getActiveCell();
+    if (!cell) {
+      return false;
+    }
 
-    cellStarted = true;
+    this.#cell = cell;
+    this.#ed = vscode.window.activeTextEditor!;
+    const here = this.#ed.selection.active;
+    this.#ed.selection = new vscode.Selection(here, here);
+    this.#ed.setDecorations(this.#decorationType, [new vscode.Range(here, here)]);
+
+    this.cellStarted = true;
     return true;
   };
 
-  return {
-    startCodeCell: (): Promise<boolean>  => startCell("notebook.cell.insertCodeCellBelow"),
-    startMarkdownCell: (): Promise<boolean> => startCell("notebook.cell.insertMarkdownCellBelow"),
-    write: async (data: string): Promise<boolean> => {
-      if (checkDone()) {
+  startCodeCell(): Promise<boolean> {
+    return this.startCell("notebook.cell.insertCodeCellBelow");
+  };
+
+  startMarkdownCell(): Promise<boolean> {
+    return this.startCell("notebook.cell.insertMarkdownCellBelow");
+  }
+
+  async write(data: string): Promise<boolean> {
+      if (this.checkDone()) {
         return false;
       }
 
-      if (!cellStarted) {
-        if (!await startCell("notebook.cell.insertMarkdownCellBelow")) {
+      if (!this.cellStarted) {
+        if (!await this.startCell("notebook.cell.insertMarkdownCellBelow")) {
           console.log("write: couldn't start markdown cell.");
           return false;
         }
       }
 
       try {
-        const ok = await typeText(ed, data);
+        const ok = await typeText(this.#ed, data);
         if (!ok) {
           console.log("write: typeText failed. Cancelling.");
-          cancelled = true;
+          this.#cancelled = true;
         }
-        return !cancelled;
+        return !this.#cancelled;
       } finally {
-        if (cancelled) {
-          cleanup();
+        if (this.#cancelled) {
+          this.cleanup();
         }
       }
-    },
+    }
 
-    close: async (): Promise<boolean> => {
-      cleanup();
-      return !cancelled;
-    },
-  };
+  async close(): Promise<boolean> {
+    this.cleanup();
+    return !this.#cancelled;
+  }
 }
