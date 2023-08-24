@@ -1,10 +1,5 @@
 import * as vscode from "vscode";
-import { WriteCloser, typeText } from "./stream";
-
-interface CellWriter extends WriteCloser {
-  startCodeCell(): Promise<boolean>;
-  startMarkdownCell(): Promise<boolean>;
-}
+import { CellWriter, typeText } from "./stream";
 
 export function getActiveCell(): vscode.NotebookCell | undefined {
   const ed = vscode.window.activeNotebookEditor;
@@ -18,6 +13,7 @@ export function getActiveCell(): vscode.NotebookCell | undefined {
   return ed.notebook.cellAt(sel.start);
 }
 
+/** Returns a writer that appends cells to the active notebook. */
 export function writerForNotebook(): CellWriter | undefined {
 
   let cell = getActiveCell();
@@ -30,23 +26,10 @@ export function writerForNotebook(): CellWriter | undefined {
   }
   let ed = vscode.window.activeTextEditor;
 
-  var editing = false;
   var cancelled = false;
 
   // Attach listeners to detect cursor movement or text change
   const disposables: vscode.Disposable[] = [];
-
-  disposables.push(vscode.window.onDidChangeTextEditorSelection((e) => {
-    if (e.textEditor === ed && !editing) {
-      cancelled = true;
-    }
-  }));
-
-  disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
-    if (e.document === ed.document && !editing) {
-      cancelled = true;
-    }
-  }));
 
   const decorationType = vscode.window.createTextEditorDecorationType({
     after: {
@@ -58,9 +41,14 @@ export function writerForNotebook(): CellWriter | undefined {
   const here = ed.selection.active;
   ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
 
+  disposables.push({
+    dispose: () => {
+      ed.setDecorations(decorationType, []);
+      decorationType.dispose();
+    }
+  });
+
   const cleanup = () => {
-    ed.setDecorations(decorationType, []);
-    decorationType.dispose();
     for (const disposable of disposables) {
       disposable.dispose();
     }
@@ -71,42 +59,54 @@ export function writerForNotebook(): CellWriter | undefined {
     if (disposables.length === 0) {
       return true;
     }
-    cancelled ||= ed !== vscode.window.activeTextEditor;
-    cancelled ||= getActiveCell() !== cell;
+
+    if (ed !== vscode.window.activeTextEditor) {
+      console.log("Active editor changed. Cancelling.");
+      cancelled = true;
+    } else if (getActiveCell() !== cell) {
+      console.log("Active cell changed. Cancelling.");
+      cancelled = true;
+    }
+
     if (cancelled) {
       cleanup();
     }
     return disposables.length === 0;
   };
 
+  let cellStarted = false;
+
   const startCell = async (command: string): Promise<boolean> => {
     if (checkDone()) {
       return false;
     }
-    editing = true;
-    try {
 
-      // Remove trailing blank line in previous cell
-      await ed.edit((builder) => {
-        if (ed.document.lineCount < 2) {
-          return;
-        }
-        const last = ed.document.lineAt(ed.document.lineCount - 1);
-        if (!last.isEmptyOrWhitespace) {
-          return;
-        }
-        const prev = ed.document.lineAt(ed.document.lineCount - 2);
-        builder.delete(new vscode.Range(prev.range.end, last.rangeIncludingLineBreak.end));
-      });
+    // Remove trailing blank line in previous cell
+    await ed.edit((builder) => {
+      if (ed.document.lineCount < 2) {
+        return;
+      }
+      const last = ed.document.lineAt(ed.document.lineCount - 1);
+      if (!last.isEmptyOrWhitespace) {
+        return;
+      }
+      const prev = ed.document.lineAt(ed.document.lineCount - 2);
+      builder.delete(new vscode.Range(prev.range.end, last.rangeIncludingLineBreak.end));
+    });
 
-      await vscode.commands.executeCommand(command);
-      await vscode.commands.executeCommand("notebook.cell.edit");
-      cell = getActiveCell();
-      ed = vscode.window.activeTextEditor!;
-      return true;
-    } finally {
-      editing = false;
-    }
+    ed.setDecorations(decorationType, []);
+
+    await vscode.commands.executeCommand(command);
+    await vscode.commands.executeCommand("notebook.cell.edit");
+    cell = getActiveCell();
+
+    ed = vscode.window.activeTextEditor!;
+    const here = ed.selection.active;
+    ed.selection = new vscode.Selection(here, here);
+    ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
+
+    cellStarted = true;
+    return true;
   };
 
   return {
@@ -117,13 +117,21 @@ export function writerForNotebook(): CellWriter | undefined {
         return false;
       }
 
-      editing = true;
+      if (!cellStarted) {
+        if (!await startCell("notebook.cell.insertMarkdownCellBelow")) {
+          console.log("write: couldn't start markdown cell.");
+          return false;
+        }
+      }
+
       try {
         const ok = await typeText(ed, data);
-        cancelled = cancelled || !ok;
+        if (!ok) {
+          console.log("write: typeText failed. Cancelling.");
+          cancelled = true;
+        }
         return !cancelled;
       } finally {
-        editing = false;
         if (cancelled) {
           cleanup();
         }

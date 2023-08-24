@@ -2,11 +2,39 @@ import * as assert from "assert";
 import * as vscode from "vscode";
 import { writerForNotebook } from "../../lib/notebook";
 
+interface Cell {
+  lang: string;
+  text: string;
+}
+
+async function setupNotebook(cells: Cell[]): Promise<vscode.NotebookEditor> {
+  const langToKind = (lang: string): vscode.NotebookCellKind => {
+    switch (lang) {
+      case "markdown":
+        return vscode.NotebookCellKind.Markup;
+      case "python":
+        return vscode.NotebookCellKind.Code;
+      default:
+        throw new Error(`Unknown language: ${lang}`);
+    }
+  };
+  const cellData = cells.map((c) =>
+    new vscode.NotebookCellData(langToKind(c.lang), c.text, c.lang)
+  );
+  const notebook = await vscode.workspace.openNotebookDocument(
+    "jupyter-notebook",
+    new vscode.NotebookData(cellData),
+  );
+  return vscode.window.showNotebookDocument(notebook);
+}
+
 function checkCells(expectedCells: string[]) {
   const noteEd = vscode.window.activeNotebookEditor;
   assert.ok(noteEd);
   for (let i = 0; i < expectedCells.length; i++) {
-    assert.ok(i < noteEd.notebook.cellCount);
+    if (i >= noteEd.notebook.cellCount) {
+      assert.fail(`cell ${i} doesn't exist`);
+    }
     const cell: vscode.NotebookCell = noteEd.notebook.cellAt(i);
     assert.strictEqual(cell.document.getText(), expectedCells[i]);
   }
@@ -24,7 +52,11 @@ function checkCellKinds(expectedKinds: vscode.NotebookCellKind[]) {
   assert.strictEqual(noteEd.notebook.cellCount, expectedKinds.length);
 }
 
-function checkCursor(expectedCell: number, expectedLine: number, expectedCharacter: number) {
+function checkCursor(
+  expectedCell: number,
+  expectedLine: number,
+  expectedCharacter: number,
+) {
   const noteEd = vscode.window.activeNotebookEditor;
   assert.ok(noteEd);
   assert.strictEqual(noteEd.selection.start, expectedCell);
@@ -42,17 +74,10 @@ describe("writerForNotebook", () => {
   before(async function () {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
 
-    const cell = new vscode.NotebookCellData(
-      vscode.NotebookCellKind.Code,
-      "First line\n",
-      "python",
-    );
-    this.notebook = await vscode.workspace.openNotebookDocument(
-      "jupyter-notebook",
-      new vscode.NotebookData([cell]),
-    );
-
-    const noteEd = await vscode.window.showNotebookDocument(this.notebook);
+    const noteEd = await setupNotebook([{
+      lang: "python",
+      text: "First line\n",
+    }]);
     checkCellKinds([vscode.NotebookCellKind.Code]);
 
     assert.strictEqual(noteEd.selection.start, 0);
@@ -73,40 +98,53 @@ describe("writerForNotebook", () => {
   });
 
   describe("write", () => {
-    it("writes to the text editor", async function () {
+    it("starts a new markdown cell automatically", async function () {
       const edit = "Next line\n";
       assert.ok(await this.writer.write(edit), "write failed");
-      checkCells(["First line\nNext line\n"]);
+      checkCells(["First line", "Next line\n"]);
+      checkCellKinds([
+        vscode.NotebookCellKind.Code,
+        vscode.NotebookCellKind.Markup,
+      ]);
     });
-  
+
     it("moves the cursor", function () {
-      checkCursor(0, 2, 0);
+      checkCursor(1, 1, 0);
     });
   });
 
   describe("startMarkdownCell", () => {
     it("appends a markdown cell", async function () {
       assert.ok(await this.writer.startMarkdownCell());
-      checkCells(["First line\nNext line", ""]);
-      checkCursor(1, 0, 0);
-    });  
+      checkCells(["First line", "Next line", ""]);
+      checkCellKinds([
+        vscode.NotebookCellKind.Code,
+        vscode.NotebookCellKind.Markup,
+        vscode.NotebookCellKind.Markup,
+      ]);
+    });
+
+    it("moves the cursor", function () {
+      checkCursor(2, 0, 0);
+    });
   });
 
   describe("write", () => {
     it("writes to the new cell", async function () {
-      const edit = "Cell 2\n";
-      assert.ok(await this.writer.write(edit));
-      checkCells(["First line\nNext line", "Cell 2\n"]);
-      checkCellKinds([vscode.NotebookCellKind.Code, vscode.NotebookCellKind.Markup]);
-      checkCursor(1, 1, 0);
+      assert.ok(await this.writer.write("Cell 2\n"), "write failed");
+      checkCells(["First line", "Next line", "Cell 2\n"]);
+    });
+
+    it("moves the cursor", function () {
+      checkCursor(2, 1, 0);
     });
   });
 
   describe("close", () => {
     it("close doesn't change the cells or cursor", async function () {
       assert.ok(await this.writer.close());
-      checkCells(["First line\nNext line", "Cell 2\n"]);
-      checkCursor(1, 1, 0);
+      checkCells(["First line", "Next line", "Cell 2\n"]);
+      checkCursor(2, 1, 0);
     });
   });
 });

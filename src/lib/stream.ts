@@ -39,6 +39,11 @@ export interface WriteCloser extends Writer {
   close(): Promise<boolean>;
 }
 
+export interface CellWriter extends WriteCloser {
+  startCodeCell(): Promise<boolean>;
+  startMarkdownCell(): Promise<boolean>;
+}
+
 /**
  * Returns a Reader and Writer that are connected to each other.
  * There is no buffering; writes will block until the reader is ready.
@@ -55,7 +60,7 @@ export function makePipe(): [Reader, WriteCloser] {
       if (isReading) {
         throw new Error("Already reading");
       } else if (done) {
-        return nextRead.promise;
+        return DONE;
       }
 
       isReading = true;
@@ -90,6 +95,9 @@ export function makePipe(): [Reader, WriteCloser] {
       }
       readerWaiting = new Completer<boolean>();
       nextRead.resolve(data);
+      if (data === DONE) {
+        done = true;
+      }
       return true;
     } finally {
       sending = false;

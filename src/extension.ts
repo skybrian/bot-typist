@@ -2,11 +2,13 @@ import * as vscode from "vscode";
 import * as child_process from "child_process";
 import * as util from "util";
 
-import { Writer, TextEditorWriter, writeStdout } from "./lib/stream";
+import { makePipe, TextEditorWriter, Writer, writeStdout } from "./lib/stream";
 import { getActiveCell, writerForNotebook } from "./lib/notebook";
+import { splitCells } from "./lib/parsers";
 
 const selector: vscode.DocumentSelector = [
-  'plaintext', 'markdown'
+  "plaintext",
+  "markdown",
 ];
 
 function getCommandPath() {
@@ -60,7 +62,11 @@ async function checkCommandPath(
   }
 }
 
-async function typeBotReply(out: Writer, prompt: string, options?: {prefix?: string, suffix?: string}): Promise<boolean> {
+async function typeBotReply(
+  out: Writer,
+  prompt: string,
+  options?: { prefix?: string; suffix?: string },
+): Promise<boolean> {
   const path = getCommandPath();
   if (!path || await checkCommandPath(path) !== ConfigState.ok) {
     showConfigError(
@@ -74,7 +80,7 @@ async function typeBotReply(out: Writer, prompt: string, options?: {prefix?: str
     return false;
   }
 
-  if (!await writeStdout(out, path, [], {stdin: prompt})) {
+  if (!await writeStdout(out, path, [], { stdin: prompt })) {
     return false;
   }
 
@@ -104,7 +110,10 @@ function showConfigError(msg: string) {
  * @param ed The editor to search.
  * @param endLine The line number after the last line of the prompt.
  */
-function choosePromptStart(ed: vscode.TextEditor, endLine: number): vscode.Position {
+function choosePromptStart(
+  ed: vscode.TextEditor,
+  endLine: number,
+): vscode.Position {
   for (let i = endLine - 1; i >= 0; i--) {
     const line = ed.document.lineAt(i);
     if (line.text.trim() === "<blockquote>") {
@@ -117,17 +126,14 @@ function choosePromptStart(ed: vscode.TextEditor, endLine: number): vscode.Posit
 function choosePrompt(): string | undefined {
   const cell = getActiveCell();
   if (cell) {
-      // Include the text of each cell up to the current one.
-      let prompt = '';
-      for (let i = 0; i <= cell.index; i++) {
-        const c = cell.notebook.cellAt(i);
-        if (i > 0) {
-          prompt += '\n%%\n';
-        }
-        prompt += c.document.getText();
-      }
+    // Include the text of each cell up to the current one.
+    let prompt = "";
+    for (let i = 0; i <= cell.index; i++) {
+      const doc = cell.notebook.cellAt(i).document;
+      prompt += `%${doc.languageId}\n${doc.getText()}\n`;
+    }
 
-      return prompt;
+    return prompt;
   }
 
   const ed = vscode.window.activeTextEditor;
@@ -185,10 +191,10 @@ async function typeAsBot() {
 
   const writer = new TextEditorWriter(ed);
   try {
-    await typeBotReply(writer, prompt, {prefix, suffix: '\n'});
+    await typeBotReply(writer, prompt, { prefix, suffix: "\n" });
   } finally {
     await writer.close();
-  } 
+  }
 }
 
 /** If in a notebook cell, insert a new markdown cell with the bot's reply. */
@@ -199,8 +205,8 @@ async function insertReplyBelow(): Promise<boolean> {
     return false;
   }
 
-  const path = getCommandPath();
-  if (!path || await checkCommandPath(path) !== ConfigState.ok) {
+  const llmPath = getCommandPath();
+  if (!llmPath || await checkCommandPath(llmPath) !== ConfigState.ok) {
     showConfigError(
       `Can't run llm command. Check that bot-typist.llm.path is set correctly in settings.`,
     );
@@ -208,31 +214,42 @@ async function insertReplyBelow(): Promise<boolean> {
   }
 
   if (vscode.window.activeNotebookEditor) {
-    const writer = writerForNotebook();
-    if (!writer) {
-      console.log("insertReplyBelow: no notebook writer");
+    const cellWriter = writerForNotebook();
+    if (!cellWriter) {
+      console.log("insertReplyBelow: no cell writer");
       return false;
     }
 
+    const systemPrompt =
+      `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
+
+Replies consist of one or more cells. Before writing any reply, always write '%markdown' or '%python'
+on a line by itself, to indicate the cell type for the first cell. Whenever writing Python code,
+always start a new cell. To display an image, write an expression that evaluates to the image.
+`;
+
+    const [pipeOut, pipeIn] = makePipe();
+    const commandDone = writeStdout(pipeIn, llmPath, ["--system", systemPrompt], {
+      stdin: prompt,
+    });
+    const parseDone = splitCells(cellWriter, pipeOut);
     try {
-      if (!await writer.startMarkdownCell()) {
-        console.log("insertReplyBelow: couldn't create markdown cell for reply");
-        return false;
-      }
 
-      if (!await writeStdout(writer, path, [], {stdin: prompt})) {
-        return false;
+      try {
+        await commandDone;
+      } finally {
+        pipeIn.close();
       }
+      console.log("command done");
 
-      if (!await writer.startMarkdownCell()) {
-        console.log("insertReplyBelow: couldn't create markdown cell after reply");
-        return false;
-      }
+      await parseDone;
+      console.log("parse done");
+      await cellWriter.startMarkdownCell();
+      return true;
     } finally {
-      await writer.close();
+      await cellWriter.close();
+      console.log("notebook writer closed");
     }
-
-    return true;    
   }
 
   // TODO: non-notebook version
@@ -240,15 +257,22 @@ async function insertReplyBelow(): Promise<boolean> {
 }
 
 /** Open a new editor tab with the prompt used for the current position. */
-async function showPrompt(): Promise<boolean> {  
+async function showPrompt(): Promise<boolean> {
   const prompt = choosePrompt();
   if (!prompt) {
     console.log("showPrompt: no prompt to show");
     return false;
   }
 
-  const doc = await vscode.workspace.openTextDocument({content: prompt, language: 'plaintext'});
-  await vscode.window.showTextDocument(doc, {viewColumn: vscode.ViewColumn.Beside, preview: true, preserveFocus: true});
+  const doc = await vscode.workspace.openTextDocument({
+    content: prompt,
+    language: "plaintext",
+  });
+  await vscode.window.showTextDocument(doc, {
+    viewColumn: vscode.ViewColumn.Beside,
+    preview: true,
+    preserveFocus: true,
+  });
   return true;
 }
 
@@ -281,7 +305,12 @@ export function activate(context: vscode.ExtensionContext) {
 
   // commands
   push(vscode.commands.registerCommand("bot-typist.type", typeAsBot));
-  push(vscode.commands.registerCommand("bot-typist.insert-reply-below", insertReplyBelow));
+  push(
+    vscode.commands.registerCommand(
+      "bot-typist.insert-reply-below",
+      insertReplyBelow,
+    ),
+  );
   push(vscode.commands.registerCommand("bot-typist.show-prompt", showPrompt));
 
   push(
