@@ -1,5 +1,119 @@
 import * as vscode from "vscode";
-import { CellWriter, typeText } from "./stream";
+import { CellWriter, WriteCloser } from "./streams";
+
+/**
+ * Writes to a text editor at the current cursor position.
+ *
+ * Writing will be cancelled if the cursor moves or the document is edited.
+ */
+export class TextEditorWriter implements WriteCloser {
+  private readonly ed: vscode.TextEditor;
+
+  private readonly disposables: vscode.Disposable[] = [];
+
+  private insertingOutput = false;
+  private cancelled = false;
+
+  constructor(ed: vscode.TextEditor) {
+    this.ed = ed;
+
+    this.disposables.push(vscode.window.onDidChangeTextEditorSelection((e) => {
+      if (e.textEditor === ed && !this.insertingOutput) {
+        this.cancelled = true;
+      }
+    }));
+
+    this.disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
+      if (e.document === ed.document && !this.insertingOutput) {
+        this.cancelled = true;
+      }
+    }));
+
+    const decorationType = vscode.window.createTextEditorDecorationType({
+      after: {
+        contentText: "...",
+        color: "gray",
+      },
+    });
+
+    const here = ed.selection.active;
+    ed.setDecorations(decorationType, [new vscode.Range(here, here)]);
+
+    this.disposables.push({
+      dispose: () => {
+        this.ed.setDecorations(decorationType, []);
+        decorationType.dispose();
+      },
+    });
+  }
+
+  async write(data: string): Promise<boolean> {
+    if (this.disposables.length === 0) {
+      return false;
+    }
+
+    this.insertingOutput = true;
+    try {
+      const ok = await typeText(this.ed, data);
+      this.cancelled = this.cancelled || !ok;
+      return !this.cancelled;
+    } finally {
+      this.insertingOutput = false;
+      if (this.cancelled) {
+        this.close();
+      }
+    }
+  }
+
+  async close(): Promise<boolean> {
+    for (const disposable of this.disposables) {
+      disposable.dispose();
+    }
+    this.disposables.length = 0;
+    return !this.cancelled;
+  }
+}
+
+/**
+ * Types some text into the current document at the cursor.
+ * Returns true if the text was typed successfully.
+ */
+export async function typeText(
+  ed: vscode.TextEditor,
+  newText: string,
+): Promise<boolean> {
+  if (ed.selections.length !== 1 || !ed.selection.isEmpty) {
+    console.log("typeText: selection not empty");
+    return false;
+  }
+
+  // insert text
+
+  const here = ed.selection.active;
+  const edit = new vscode.WorkspaceEdit();
+  edit.insert(ed.document.uri, here, newText);
+
+  if (!await vscode.workspace.applyEdit(edit)) {
+    console.log(`typeText: applyEdit failed for: '${newText}'`);
+    return false;
+  }
+
+  if (ed.selections.length !== 1 || !ed.selection.isEmpty) {
+    console.log("typeText: selection not empty after edit");
+    return false;
+  }
+
+  // update cursor position
+
+  const lines = newText.split("\n");
+  const lineDelta = lines.length - 1;
+  const charDelta = lines[lineDelta].length;
+  const newPosition = here.translate(lineDelta, charDelta);
+
+  ed.selection = new vscode.Selection(newPosition, newPosition);
+  return true;
+}
+
 
 export function getActiveCell(): vscode.NotebookCell | undefined {
   const ed = vscode.window.activeNotebookEditor;

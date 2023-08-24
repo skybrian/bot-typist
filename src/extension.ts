@@ -2,9 +2,9 @@ import * as vscode from "vscode";
 import * as child_process from "child_process";
 import * as util from "util";
 
-import { makePipe, TextEditorWriter, Writer, writeStdout } from "./lib/stream";
-import { getActiveCell, writerForNotebook } from "./lib/notebook";
+import { TextEditorWriter, getActiveCell, writerForNotebook } from "./lib/editors";
 import { splitCells } from "./lib/parsers";
+import { makePipe, Writer, writeStdout } from "./lib/streams";
 
 const selector: vscode.DocumentSelector = [
   "plaintext",
@@ -299,8 +299,6 @@ const completion: vscode.CompletionItemProvider = {
 };
 
 export function activate(context: vscode.ExtensionContext) {
-  console.log("activate called");
-
   const push = context.subscriptions.push.bind(context.subscriptions);
 
   // commands

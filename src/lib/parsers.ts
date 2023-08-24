@@ -1,4 +1,4 @@
-import { CellWriter, Reader, DONE } from "./stream";
+import { CellWriter, Reader, DONE } from "./streams";
 
 /**
  * Splits input into cells and sends them to the output.
