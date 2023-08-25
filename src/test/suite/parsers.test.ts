@@ -16,10 +16,6 @@ class TestReader implements Reader {
     }
     return Promise.resolve(this.chunks[this.next++]);
   }
-
-  cancel(): void {
-    throw new Error("Method not implemented.");
-  }
 }
 
 interface Cell {

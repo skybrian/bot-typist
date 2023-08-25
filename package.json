@@ -12,7 +12,6 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:plaintext",
     "onLanguage:markdown"
   ],
   "main": "./out/extension.js",
@@ -31,16 +30,12 @@
     },
     "commands": [
       {
-        "command": "bot-typist.type",
-        "title": "Talk to Bot"
-      },
-      {
-        "command": "bot-typist.insert-reply-below",
-        "title": "Bot: Insert Reply Below"
+        "command": "bot-typist.insert-reply",
+        "title": "Bot: Insert Reply"
       },
       {
         "command": "bot-typist.show-prompt",
-        "title": "Bot: Show Prompt For Position"
+        "title": "Bot: Show Prompt"
       }
     ]
   },

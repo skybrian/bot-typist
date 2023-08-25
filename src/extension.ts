@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as child_process from "child_process";
 import * as util from "util";
 
-import { TextEditorWriter, getActiveCell, writerForNotebook } from "./lib/editors";
+import { getActiveCell, writerForNotebook } from "./lib/editors";
 import { splitCells } from "./lib/parsers";
 import { makePipe, Writer, writeStdout } from "./lib/streams";
 
@@ -148,60 +148,16 @@ function choosePrompt(): string | undefined {
   return prompt;
 }
 
-async function typeAsBot() {
-  console.log("typeAsBot called");
-
-  const prompt = choosePrompt();
-  if (!prompt) {
-    console.log("typeAsBot: no prompt");
-    return;
-  }
-
-  const ed = vscode.window.activeTextEditor;
-  if (!ed || ed.selections.length !== 1 || !ed.selection.isEmpty) {
-    console.log("typeAsBot: selection not empty");
+/** If in a notebook cell, insert a new markdown cell with the bot's reply. */
+async function insertReply(): Promise<boolean> {
+  const cellWriter = writerForNotebook();
+  if (!cellWriter) {
     return false;
   }
 
-  // Move cursor to end of line
-  const line = ed.document.lineAt(ed.selection.active);
-  const lineEnd = line.range.end;
-  ed.selection = new vscode.Selection(lineEnd, lineEnd);
-
-  // Choose prefix to type at end of line
-  console.log(`line: '${line.text}'`);
-  let prefix = "\n\nbot: ";
-  if (line.text.length === 0) {
-    if (
-      line.lineNumber > 0 &&
-      ed.document.lineAt(line.lineNumber - 1).text.trim().length > 0
-    ) {
-      prefix = "\nbot:";
-    } else {
-      prefix = "bot: ";
-    }
-  } else if (line.text.endsWith(": ")) {
-    prefix = "";
-  } else if (line.text.endsWith(":")) {
-    prefix = " ";
-  } else if (line.text === "bot") {
-    prefix = ": ";
-  }
-  console.log(`prefix: '${prefix}'`);
-
-  const writer = new TextEditorWriter(ed);
-  try {
-    await typeBotReply(writer, prompt, { prefix, suffix: "\n" });
-  } finally {
-    await writer.close();
-  }
-}
-
-/** If in a notebook cell, insert a new markdown cell with the bot's reply. */
-async function insertReplyBelow(): Promise<boolean> {
   const prompt = choosePrompt();
   if (!prompt) {
-    console.log("insertReplyBelow: no prompt");
+    console.log("insertReply: no prompt");
     return false;
   }
 
@@ -213,15 +169,8 @@ async function insertReplyBelow(): Promise<boolean> {
     return false;
   }
 
-  if (vscode.window.activeNotebookEditor) {
-    const cellWriter = writerForNotebook();
-    if (!cellWriter) {
-      console.log("insertReplyBelow: no cell writer");
-      return false;
-    }
-
-    const systemPrompt =
-      `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
+  const systemPrompt =
+    `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
 
 Replies consist of one or more cells. Before writing anything else, always write
 '%markdown' or '%python' on a line by itself, to indicate the cell type.
@@ -232,32 +181,32 @@ followed by the Python code in a separate cell.
 To display an image, write an expression that evaluates to the image.
 `;
 
-    const [pipeOut, pipeIn] = makePipe();
-    const commandDone = writeStdout(pipeIn, llmPath, ["--system", systemPrompt], {
+  const [pipeOut, pipeIn] = makePipe();
+  const commandDone = writeStdout(
+    pipeIn,
+    llmPath,
+    ["--system", systemPrompt],
+    {
       stdin: prompt,
-    });
-    const parseDone = splitCells(cellWriter, pipeOut);
+    },
+  );
+  const parseDone = splitCells(cellWriter, pipeOut);
+  try {
     try {
-
-      try {
-        await commandDone;
-      } finally {
-        pipeIn.close();
-      }
-      console.log("command done");
-
-      await parseDone;
-      console.log("parse done");
-      await cellWriter.startMarkdownCell();
-      return true;
+      await commandDone;
     } finally {
-      await cellWriter.close();
-      console.log("notebook writer closed");
+      pipeIn.close();
     }
-  }
+    console.log("command done");
 
-  // TODO: non-notebook version
-  return false;
+    await parseDone;
+    console.log("parse done");
+    await cellWriter.startMarkdownCell();
+    return true;
+  } finally {
+    await cellWriter.close();
+    console.log("notebook writer closed");
+  }
 }
 
 /** Open a new editor tab with the prompt used for the current position. */
@@ -280,44 +229,17 @@ async function showPrompt(): Promise<boolean> {
   return true;
 }
 
-const botPattern = /bot:?\s*$/;
-
-const completion: vscode.CompletionItemProvider = {
-  provideCompletionItems(document, position) {
-    const linePrefix = document.lineAt(position).text.substring(
-      0,
-      position.character,
-    );
-
-    if (!botPattern.test(linePrefix)) {
-      return undefined;
-    }
-
-    console.log("adding completion item");
-
-    let item = new vscode.CompletionItem("Talk to Bot");
-    item.insertText = "";
-    item.command = { command: "bot-typist.type", title: "Talk to Bot" };
-    return [item];
-  },
-};
-
 export function activate(context: vscode.ExtensionContext) {
   const push = context.subscriptions.push.bind(context.subscriptions);
 
-  // commands
-  push(vscode.commands.registerCommand("bot-typist.type", typeAsBot));
-  push(
-    vscode.commands.registerCommand(
-      "bot-typist.insert-reply-below",
-      insertReplyBelow,
-    ),
-  );
-  push(vscode.commands.registerCommand("bot-typist.show-prompt", showPrompt));
-
-  push(
-    vscode.languages.registerCompletionItemProvider(selector, completion, ":"),
-  );
+  push(vscode.commands.registerCommand(
+    "bot-typist.insert-reply",
+    insertReply,
+  ));
+  push(vscode.commands.registerCommand(
+    "bot-typist.show-prompt",
+    showPrompt,
+  ));
 }
 
 export function deactivate() {}

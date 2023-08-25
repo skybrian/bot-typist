@@ -1,48 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 
-import { TextEditorWriter, writerForNotebook } from "../../lib/editors";
-
-describe("TextEditorWriter", async () => {
-
-  let doc: vscode.TextDocument;
-  let ed: vscode.TextEditor;
-  let writer: TextEditorWriter;
-
-  before(async () => {
-    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
-
-    doc = await vscode.workspace.openTextDocument({
-      language: "plaintext",
-      content: "First line\n",
-    });
-    ed = await vscode.window.showTextDocument(doc);
-    ed.selection = new vscode.Selection(1, 0, 1, 0);
-    writer = new TextEditorWriter(ed);
-  });
-
-  describe("write", () => {
-    it("writes to the text editor", async function () {
-      assert.ok(await writer.write("Next line\n"), "write failed");
-      assert.strictEqual(doc.getText(), "First line\nNext line\n");
-    });
-  
-    it("moves the cursor", function () {
-      assert.strictEqual(ed.selection.active.line, 2);
-      assert.strictEqual(ed.selection.active.character, 0);
-    });
-  });
-
-  describe("close", () => {
-    it("doesn't modify the document or move the cursor", async function () {
-      await writer.close();
-  
-      assert.strictEqual(doc.getText(), "First line\nNext line\n");
-      assert.strictEqual(ed.selection.active.line, 2);
-      assert.strictEqual(ed.selection.active.character, 0);
-    });  
-  });
-});
+import { writerForNotebook } from "../../lib/editors";
 
 interface Cell {
   lang: string;

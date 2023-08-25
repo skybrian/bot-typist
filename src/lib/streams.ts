@@ -13,11 +13,6 @@ export interface Reader {
    * @returns a chunk or DONE if no more data is available.
    */
   read(): Promise<ReadResult>;
-
-  /**
-   * Signals that no more data will be read and resources can be cleaned up.
-   */
-  cancel(): void;
 }
 
 export interface Writer {
@@ -71,12 +66,6 @@ export function makePipe(): [Reader, WriteCloser] {
       } finally {
         isReading = false;
       }
-    },
-
-    cancel: function (): void {
-      readerWaiting.resolve(false);
-      nextRead.resolve(DONE);
-      done = true;
     },
   };
 

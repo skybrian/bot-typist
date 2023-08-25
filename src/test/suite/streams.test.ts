@@ -61,13 +61,6 @@ describe("makePipe", () => {
     assert.ok(await end);
   });
 
-  it("works when immediately cancelled", async () => {
-    const [reader, writer] = makePipe();
-    const end = writer.close();
-    reader.cancel();
-    assert.equal(await end, false);
-  });
-
   it("works for one write", async () => {
     const [reader, writer] = makePipe();
 
@@ -78,16 +71,5 @@ describe("makePipe", () => {
     const end = writer.close();
     assert.strictEqual(await reader.read(), DONE);
     assert.ok(await end);
-  });
-
-  it("works when cancelled after one write", async () => {
-    const [reader, writer] = makePipe();
-
-    const write = writer.write("hello!");
-    assert.strictEqual(await reader.read(), "hello!");
-    assert.ok(await write);
-
-    reader.cancel();
-    assert.equal(await writer.close(), false);
   });
 });
