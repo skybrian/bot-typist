@@ -223,9 +223,13 @@ async function insertReplyBelow(): Promise<boolean> {
     const systemPrompt =
       `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
 
-Replies consist of one or more cells. Before writing any reply, always write '%markdown' or '%python'
-on a line by itself, to indicate the cell type for the first cell. Whenever writing Python code,
-always start a new cell. To display an image, write an expression that evaluates to the image.
+Replies consist of one or more cells. Before writing anything else, always write
+'%markdown' or '%python' on a line by itself, to indicate the cell type.
+
+When writing Python code, first write a Markdown cell explaining what you're doing,
+followed by the Python code in a separate cell.
+
+To display an image, write an expression that evaluates to the image.
 `;
 
     const [pipeOut, pipeIn] = makePipe();

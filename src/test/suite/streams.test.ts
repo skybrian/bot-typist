@@ -14,16 +14,42 @@ export class StringWriter implements Writer {
   }
 }
 
+export class CancellingWriter implements Writer {
+  public async write(data: string): Promise<boolean> {
+    return false;
+  }
+
+  public async end(): Promise<boolean> {
+    return true;
+  }
+}
+
 describe("writeStdout", () => {
   it("writes a command's output to the writer", async () => {
     const buf = new StringWriter();
     assert.ok(await writeStdout(buf, "echo", ["Hello, world!"]));
+    assert.strictEqual(buf.buf, "Hello, world!\n");
+  });
+
+  it("returns false if the write is cancelled", async () => {
+    const buf = new CancellingWriter();
+    assert.equal(false, await writeStdout(buf, "echo", ["Hello, world!"]));
   });
 
   it("runs a command that takes input on stdin", async () => {
     const buf = new StringWriter();
     assert.ok(await writeStdout(buf, "cat", [], { stdin: "Hello, world!" }));
     assert.strictEqual(buf.buf, "Hello, world!");
+  });
+
+  it("returns false if the write is cancelled, with input on stdin", async () => {
+    const buf = new CancellingWriter();
+    assert.equal(false, await writeStdout(buf, "cat", [], { stdin: "Hello, world!" }));
+  });
+
+  it("rejects if the command doesn't exist", async () => {
+    const buf = new StringWriter();
+    assert.rejects(writeStdout(buf, "this-command-does-not-exist", []));
   });
 });
 

@@ -130,10 +130,38 @@ export function writeStdout(
   return new Promise((resolve, reject) => {
     const child = child_process.spawn(command, args);
 
-    let shuttingDown = false;
+    let lastAction = Promise.resolve(true);
 
-    const cleanup = () => {
+    let shuttingDown = false;
+    let error: unknown;
+
+    const stop = (msg?: string, error?: unknown) => {
+      if (shuttingDown) {
+        return; // already shutting down
+      }
       shuttingDown = true;
+
+      if (msg) {
+        console.error("writeStdout:", msg, error);
+        if (!error) {
+          error = new Error(msg);
+        }
+      }
+
+      error = error;
+
+      // Resolve or reject after all writes are done (or skipped).
+      lastAction = lastAction.then(async (ok: boolean) => {
+        if (error) {
+          throw error;
+        }
+        resolve(ok);
+        return ok;
+      }).catch((err: unknown) => {
+        reject(err);
+        return false;
+      });
+
       child.kill();
     };
 
@@ -141,52 +169,46 @@ export function writeStdout(
     if (options && options.stdin) {
       child.stdin.write(options.stdin, (err) => {
         if (err) {
-          console.error(
-            `writeStdout: error writing to stdin of external command: ${err}`,
-          );
-          cleanup();
-          resolve(false);
+          stop("error writing to stdin of external command", err);
         }
       });
       child.stdin.end();
     }
 
-    // Handle stdout
-    child.stdout.on("data", async (data) => {
+    // Schedule writes to stdout in the order received
+    child.stdout.on("data", (data) => {
       if (shuttingDown) {
-        return;
+        return; // don't schedule any more writes
       }
-
-      child.stdout.pause();
-
-      if (!await dest.write(data.toString())) {
-        console.error("External command cancelled");
-        cleanup();
-        resolve(false);
-      }
-
-      child.stdout.resume();
+      lastAction = lastAction.then(async (ok: boolean) => {
+        return ok && !error && await dest.write(data.toString());
+      });
     });
 
-    // Handle errors
+    // Stop on any error
     child.stderr.on("data", (data) => {
-      console.error(`stderr: ${data}`);
-      cleanup();
-      reject(new Error("External command wrote to stderr"));
+      stop(`stderr: ${data}`);
     });
 
-    // Cleanup on close
-    child.on("close", (code, signal) => {
-      cleanup();
+    child.on("error", (err) => {
+      stop(undefined, err);
+    });
+
+    child.on("exit", (code, signal) => {
       if (signal) {
-        console.error(`External command was killed by signal ${signal}`);
-        resolve(false);
+        stop(`External command was killed by signal ${signal}`);
       } else if (code !== 0) {
-        reject(
-          new Error(`External command exited with code ${code}`),
-        );
+        stop(`External command exited with code ${code}`);
+      }
+    });
+
+    child.on("close", (code, signal) => {
+      if (signal) {
+        stop(`External command was killed by signal ${signal}`);
+      } else if (code !== 0) {
+        stop(`External command exited with code ${code}`);
       } else {
-        resolve(true);
+        stop();
       }
     });
   });
