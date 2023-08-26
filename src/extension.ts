@@ -4,7 +4,7 @@ import * as util from "util";
 
 import { getActiveCell, writerForNotebook } from "./lib/editors";
 import { splitCells } from "./lib/parsers";
-import { makePipe, Writer, writeStdout } from "./lib/streams";
+import { ParserWriter, Writer, writeStdout } from "./lib/streams";
 
 const selector: vscode.DocumentSelector = [
   "plaintext",
@@ -155,6 +155,11 @@ async function insertReply(): Promise<boolean> {
     return false;
   }
 
+  const cellSplitter = new ParserWriter(async (reader) => {
+    await splitCells(cellWriter, reader);
+    return true;
+  });
+
   const prompt = choosePrompt();
   if (!prompt) {
     console.log("insertReply: no prompt");
@@ -180,27 +185,17 @@ followed by the Python code in a separate cell.
 
 To display an image, write an expression that evaluates to the image.
 `;
-
-  const [pipeOut, pipeIn] = makePipe();
-  const commandDone = writeStdout(
-    pipeIn,
-    llmPath,
-    ["--system", systemPrompt],
-    {
-      stdin: prompt,
-    },
-  );
-  const parseDone = splitCells(cellWriter, pipeOut);
+  
   try {
-    try {
-      await commandDone;
-    } finally {
-      pipeIn.close();
-    }
+    await writeStdout(
+      cellSplitter,
+      llmPath,
+      ["--system", systemPrompt],
+      {
+        stdin: prompt,
+      },
+    );
     console.log("command done");
-
-    await parseDone;
-    console.log("parse done");
     await cellWriter.startMarkdownCell();
     return true;
   } finally {

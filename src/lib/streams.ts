@@ -8,27 +8,29 @@ export type ReadResult = string | typeof DONE;
 
 export interface Reader {
   /**
-   * Reads a chunk from a source. Blocks until a chunk is available 
+   * Receives the next chunk of data from a stream. Blocks until it's available.
    * 
-   * @returns a chunk or DONE if no more data is available.
+   * @returns the next chunk or DONE if there are no more.
    */
   read(): Promise<ReadResult>;
 }
 
 export interface Writer {
   /**
-   * Writes a string to some destination. Blocks until the data is handed off.
+   * Sends a chunk of data to a stream. Blocks until it's handed off.
    *
-   * Returns false if writing has been cancelled.
+   * @returns false if the destination is no longer reading the stream.
+   * (Any further writes will be ignored.)
    */
   write(data: string): Promise<boolean>;
 }
 
 export interface WriteCloser extends Writer {
   /**
-   * Signals that no more data will be written and resources can be cleaned up.
+   * Signals that the stream is finished. Blocks until acknowledged.
    * 
-   * @returns false if any writes were cancelled.
+   * @returns true if the input was accepted. (Although rare, it's possible
+   * to accept a stream without reading all of it.)
    */
   close(): Promise<boolean>;
 }
@@ -39,70 +41,92 @@ export interface CellWriter extends WriteCloser {
 }
 
 /**
- * Returns a Reader and Writer that are connected to each other.
- * There is no buffering; writes will block until the reader is ready.
+ * An async function that reads a stream.
+ * @returns true if the input was accepted, or false to disconnect (cancel).
  */
-export function makePipe(): [Reader, WriteCloser] {
-  let readerWaiting = new Completer<boolean>();
-  let nextRead = new Completer<ReadResult>();
+export type Parser = (reader: Reader) => Promise<boolean>;
 
-  let isReading = false;
-  let done = false;
+/**
+ * A writer that sends data to a parse function. The parser blocks on read()
+ * calls until the writer sends data, and the writer blocks on write() calls
+ * until the the parser reads the data or disconnects.
+ * 
+ * The parser can disconnect at any time by returning or throwing. It should
+ * return true to indicate that the input was accepted.
+ */
+export class ParserWriter implements WriteCloser {
 
-  const reader: Reader = {
-    read: async (): Promise<ReadResult> => {
-      if (isReading) {
-        throw new Error("Already reading");
-      } else if (done) {
-        return DONE;
+  #writesDone = false;
+
+  /** Resolves to true if the parser called read() or false if it disconnected. */
+  #parserWaiting = new Completer<boolean>();
+  #nextWrite = new Completer<ReadResult>();
+
+  #parseResult = new Completer<boolean>();
+
+  constructor(parse: Parser) {
+
+    let isReading = false;
+    const reader: Reader = {
+      read:  async (): Promise<ReadResult> => {
+        if (isReading) {
+          throw new Error("Already reading");
+        } else if (this.#writesDone) {
+          return DONE;
+        }
+
+        isReading = true;
+        this.#parserWaiting.resolve(true);
+        try {
+          const result = await this.#nextWrite.promise;
+          this.#nextWrite = new Completer<ReadResult>();
+          return result;
+        } finally {
+          isReading = false;
+        }
       }
+    };
 
-      isReading = true;
-      readerWaiting.resolve(true);
-      try {
-        const chunk = await nextRead.promise;
-        nextRead = new Completer<ReadResult>();
-        return chunk;
-      } finally {
-        isReading = false;
-      }
-    },
-  };
+    parse(reader).then((ok) => {
+      this.#parseResult.resolve(ok);
+    }).catch((err) => {
+      this.#parseResult.reject(err);
+    }).finally(() => {
+      this.#parserWaiting.resolve(false);
+    });
+  }
 
-  let sending = false;
+  #sending = false;
 
-  const send = async (data: ReadResult): Promise<boolean> => {
-    if (sending) {
+  async #send(data: ReadResult): Promise<boolean> {
+    if (this.#sending) {
       throw new Error("Already writing");
     }
 
-    sending = true;
+    this.#sending = true;
     try {
-      if (!await readerWaiting.promise) {
-        return false; // cancelled
+      if (!await this.#parserWaiting.promise) {
+        return false; // disconnected
       }
-      readerWaiting = new Completer<boolean>();
-      nextRead.resolve(data);
+      this.#parserWaiting = new Completer<boolean>();
+      this.#nextWrite.resolve(data);
       if (data === DONE) {
-        done = true;
+        this.#writesDone = true;
       }
       return true;
     } finally {
-      sending = false;
+      this.#sending = false;
     }
   };
 
-  const writer: WriteCloser = {
-    write: async (data: string): Promise<boolean> => {
-      return send(data);
-    },
+  write(data: string): Promise<boolean> {
+    return this.#send(data);
+  }
 
-    close: function (): Promise<boolean> {
-      return send(DONE);
-    },
-  };
-
-  return [reader, writer];
+  close(): Promise<boolean> {
+    this.#send(DONE);
+    return this.#parseResult.promise;
+  }
 }
 
 /**

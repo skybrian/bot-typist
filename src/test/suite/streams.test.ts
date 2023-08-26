@@ -1,5 +1,5 @@
 import * as assert from "assert";
-import { DONE, makePipe, Writer, writeStdout } from "../../lib/streams";
+import { DONE, ParserWriter, Reader, ReadResult, Writer, writeStdout } from "../../lib/streams";
 
 export class StringWriter implements Writer {
   buf = "";
@@ -53,23 +53,89 @@ describe("writeStdout", () => {
   });
 });
 
-describe("makePipe", () => {
-  it("works when there's no data to send", async () => {
-    const [reader, writer] = makePipe();
-    const end = writer.close();
-    assert.strictEqual(await reader.read(), DONE);
-    assert.ok(await end);
+const pushAll = (dest: ReadResult[]) => async (reader: Reader): Promise<boolean> => {
+  while (true) {
+    const chunk = await reader.read();
+    dest.push(chunk);
+    if (chunk === DONE) {
+      return true;
+    }
+  }
+};
+
+describe("ParserWriter", () => {
+  describe("for zero writes", () => {
+    const reads = [] as ReadResult[];
+    const writer = new ParserWriter(pushAll(reads));
+
+    it("doesn't send anything at the start", async () => {
+      assert.strictEqual(reads.length, 0);
+    });
+
+    it("sends DONE when closed", async () => {
+      assert.ok(await writer.close());
+      assert.deepStrictEqual(reads, [DONE]);
+    });
   });
 
-  it("works for one write", async () => {
-    const [reader, writer] = makePipe();
+  describe("for one write", async () => {
+    const reads = [] as ReadResult[];
+    const writer = new ParserWriter(pushAll(reads));
 
-    const write = writer.write("hello!");
-    assert.strictEqual(await reader.read(), "hello!");
-    assert.ok(await write);
+    it("sends the write", async () => {
+      assert.ok(await writer.write("hello!"));
+      await Promise.resolve();
+      assert.deepStrictEqual(reads, ["hello!"]);
+    });
 
-    const end = writer.close();
-    assert.strictEqual(await reader.read(), DONE);
-    assert.ok(await end);
+    it("sends DONE when closed", async () => {
+      assert.ok(await writer.close());
+      assert.deepStrictEqual(reads, ["hello!", DONE]);
+    });
+  });
+
+  describe("for two writes", async () => {
+    const reads = [] as ReadResult[];
+    const writer = new ParserWriter(pushAll(reads));
+
+    it("sends the writes", async () => {
+      assert.ok(await writer.write("hello!"));
+      await Promise.resolve();
+      assert.deepStrictEqual(reads, ["hello!"]);
+      assert.ok(await writer.write("goodbye!"));
+      await Promise.resolve();
+      assert.deepStrictEqual(reads, ["hello!", "goodbye!"]);
+    });
+
+    it("sends DONE when closed", async () => {
+      assert.ok(await writer.close());
+      assert.deepStrictEqual(reads, ["hello!", "goodbye!", DONE]);
+    });
+  });
+
+  describe("write", () => {
+    it("returns false if the parser exited", async () => {
+      const writer = new ParserWriter(async (_reader) => {
+        return true;
+      });
+      assert.strictEqual(false, await writer.write("hello!"));
+    });
+  });
+
+  describe("close", () => {
+    it("returns the value from the parser", async () => {
+      const writer = new ParserWriter(async (_reader) => {
+        return false;
+      });  
+      assert.strictEqual(false, await writer.close());
+    });
+
+    it("throws an error when the parser throws", async () => {
+      const writer = new ParserWriter(async (_reader) => {
+        await Promise.resolve();
+        throw new Error("parser error");
+      });  
+      await assert.rejects(writer.close());
+    });
   });
 });
