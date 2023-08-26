@@ -125,9 +125,9 @@ describe("ParserWriter", () => {
   describe("close", () => {
     it("returns the value from the parser", async () => {
       const writer = new ParserWriter(async (_reader) => {
-        return false;
+        return "whatever";
       });  
-      assert.strictEqual(false, await writer.close());
+      assert.strictEqual("whatever", await writer.close());
     });
 
     it("throws an error when the parser throws", async () => {

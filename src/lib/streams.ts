@@ -25,36 +25,31 @@ export interface Writer {
   write(data: string): Promise<boolean>;
 }
 
-export interface WriteCloser extends Writer {
+export interface WriteCloser<T> extends Writer {
   /**
    * Signals that the stream is finished. Blocks until acknowledged.
-   * 
-   * @returns true if the input was accepted. (Although rare, it's possible
-   * to accept a stream without reading all of it.)
    */
-  close(): Promise<boolean>;
+  close(): Promise<T>;
 }
 
-export interface CellWriter extends WriteCloser {
+export interface CellWriter extends WriteCloser<boolean> {
   startCodeCell(): Promise<boolean>;
   startMarkdownCell(): Promise<boolean>;
 }
 
 /**
  * An async function that reads a stream.
- * @returns true if the input was accepted, or false to disconnect (cancel).
  */
-export type Parser = (reader: Reader) => Promise<boolean>;
+export type Parser<T> = (reader: Reader) => Promise<T>;
 
 /**
  * A writer that sends data to a parse function. The parser blocks on read()
  * calls until the writer sends data, and the writer blocks on write() calls
  * until the the parser reads the data or disconnects.
  * 
- * The parser can disconnect at any time by returning or throwing. It should
- * return true to indicate that the input was accepted.
+ * The parser can disconnect at any time by returning or throwing.
  */
-export class ParserWriter implements WriteCloser {
+export class ParserWriter<T> implements WriteCloser<T> {
 
   #writesDone = false;
 
@@ -62,9 +57,9 @@ export class ParserWriter implements WriteCloser {
   #parserWaiting = new Completer<boolean>();
   #nextWrite = new Completer<ReadResult>();
 
-  #parseResult = new Completer<boolean>();
+  #parseResult = new Completer<T>();
 
-  constructor(parse: Parser) {
+  constructor(parse: Parser<T>) {
 
     let isReading = false;
     const reader: Reader = {
@@ -87,8 +82,8 @@ export class ParserWriter implements WriteCloser {
       }
     };
 
-    parse(reader).then((ok) => {
-      this.#parseResult.resolve(ok);
+    parse(reader).then((result) => {
+      this.#parseResult.resolve(result);
     }).catch((err) => {
       this.#parseResult.reject(err);
     }).finally(() => {
@@ -119,11 +114,21 @@ export class ParserWriter implements WriteCloser {
     }
   };
 
+  /**
+   * Sends a chunk of data to the parser. Blocks until the parser
+   * reads it or exits.
+   * @returns false if the parse function exited.
+   */
   write(data: string): Promise<boolean> {
     return this.#send(data);
   }
 
-  close(): Promise<boolean> {
+  /**
+   * Signals the end the input stream to the parser.
+   * @returns the result of the parse function.
+   * @throws if the parse function threw.
+   */
+  close(): Promise<T> {
     this.#send(DONE);
     return this.#parseResult.promise;
   }

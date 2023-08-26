@@ -75,13 +75,13 @@ describe("splitCells", () => {
   });
 
   it("does nothing when there's no input", async () => {
-    await splitCells(writer, reader);
+    await splitCells(writer)(reader);
     writer.check([{ lang: "python", text: "" }]);
   });
 
   it("copies text as-is when there are no cell markers", async () => {
     reader = new TestReader(["Hello, ", "world!"]);
-    await splitCells(writer, reader);
+    await splitCells(writer)(reader);
     writer.check([
       { lang: "python", text: "Hello, world!" },
     ]);
@@ -90,7 +90,7 @@ describe("splitCells", () => {
   it("starts new cells for cell markers", async () => {
     reader = new TestReader(["%python\n", "x = 1\n", "%markdown\n", "Hi!"]);
 
-    await splitCells(writer, reader);
+    await splitCells(writer)(reader);
     writer.check([
       { lang: "python", text: "" },
       { lang: "python", text: "x = 1\n" },

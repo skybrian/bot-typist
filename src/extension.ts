@@ -155,10 +155,7 @@ async function insertReply(): Promise<boolean> {
     return false;
   }
 
-  const cellSplitter = new ParserWriter(async (reader) => {
-    await splitCells(cellWriter, reader);
-    return true;
-  });
+  const cellSplitter = new ParserWriter(splitCells(cellWriter));
 
   const prompt = choosePrompt();
   if (!prompt) {

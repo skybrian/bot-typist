@@ -6,7 +6,7 @@ import { CellWriter, Reader, DONE } from "./streams";
  * The '%' should be followed by the cell type, e.g. '%python'.
  * Currently supports python and markdown cells.
  */
-export async function splitCells(output: CellWriter, input: Reader): Promise<void> {
+export const splitCells = (output: CellWriter) => async (input: Reader): Promise<void> => {
     let buffer = '';
   
     // Parse functions return false when there is no more input or output is cancelled.
@@ -88,5 +88,5 @@ export async function splitCells(output: CellWriter, input: Reader): Promise<voi
     };
   
     while (await sendLine()) {}
-  }
+  };
   
