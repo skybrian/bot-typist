@@ -6,11 +6,6 @@ import { getActiveCell, writerForNotebook } from "./lib/editors";
 import { splitCells } from "./lib/parsers";
 import { ParserWriter, Writer, writeStdout } from "./lib/streams";
 
-const selector: vscode.DocumentSelector = [
-  "plaintext",
-  "markdown",
-];
-
 function getCommandPath() {
   return vscode.workspace.getConfiguration("bot-typist").get<string>(
     "llm.path",
@@ -60,36 +55,6 @@ async function checkCommandPath(
     console.log(`llm error: ${e}`);
     return ConfigState.commandNotFound;
   }
-}
-
-async function typeBotReply(
-  out: Writer,
-  prompt: string,
-  options?: { prefix?: string; suffix?: string },
-): Promise<boolean> {
-  const path = getCommandPath();
-  if (!path || await checkCommandPath(path) !== ConfigState.ok) {
-    showConfigError(
-      `Can't run llm command. Check that bot-typist.llm.path is set correctly in settings.`,
-    );
-    return false;
-  }
-
-  const prefix = options?.prefix;
-  if (prefix && !await out.write(prefix)) {
-    return false;
-  }
-
-  if (!await writeStdout(out, path, [], { stdin: prompt })) {
-    return false;
-  }
-
-  const suffix = options?.suffix;
-  if (suffix && !await out.write(suffix)) {
-    return false;
-  }
-
-  return true;
 }
 
 function showConfigError(msg: string) {
@@ -148,7 +113,86 @@ function choosePrompt(): string | undefined {
   return prompt;
 }
 
-/** If in a notebook cell, insert a new markdown cell with the bot's reply. */
+function decorateWhileEmpty(editor: vscode.TextEditor, placeholderText: string) {
+  if (editor.document.getText() !== '') {
+    return;
+  }
+
+  const disposables = [] as vscode.Disposable[];
+
+  const cleanup = () => {
+    for (const d of disposables) {
+      d.dispose();
+    }
+  };
+
+  const placeholder = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true,
+    after: {
+      contentText: placeholderText,
+      color: 'rgba(180,180,220,0.5)',
+      fontStyle: 'italic',
+    },
+  });
+  disposables.push(placeholder);
+  
+  const fullRange = new vscode.Range(
+      editor.document.positionAt(0),
+      editor.document.positionAt(editor.document.getText().length)
+  );
+  editor.setDecorations(placeholder, [fullRange]);      
+
+  disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
+    if (e.document === editor.document && e.document.getText() !== '') {
+      editor.setDecorations(placeholder, []);
+      cleanup();
+    }
+  }));
+
+  disposables.push(vscode.workspace.onDidCloseTextDocument((doc) => {
+    if (doc === editor.document) {
+      cleanup();
+    }
+  }));
+}
+
+async function createUntitledNotebook(): Promise<boolean> {
+
+  const cell = new vscode.NotebookCellData(vscode.NotebookCellKind.Markup, '', 'markdown');
+  cell.metadata = {
+  };
+  const data = new vscode.NotebookData([cell]);
+  
+  /* eslint-disable @typescript-eslint/naming-convention */
+  // metadata copied from ipynb.newUntitledIpynb:
+  // https://github.com/microsoft/vscode/blob/42ce7b7a2eeaa102ee40605a446174fce71c285a/extensions/ipynb/src/ipynbMain.ts#L76
+  data.metadata = {
+    custom: {
+      cells: [],
+      metadata: {
+        orig_nbformat: 4
+      },
+      nbformat: 4,
+      nbformat_minor: 2
+    }
+  };
+
+  const doc = await vscode.workspace.openNotebookDocument('jupyter-notebook', data);
+  await vscode.window.showNotebookDocument(doc);
+  
+  await vscode.commands.executeCommand("notebook.cell.edit");
+  
+  const ed = vscode.window.activeTextEditor;
+  if (!ed) {
+    console.log("createUntitledNotebook: no text editor");
+    return false;
+  }
+  decorateWhileEmpty(ed, 'Type your question here and press Control+Alt Enter to get a response.');
+  
+  return true;
+}
+
+/** If in a notebook cell, inserts a new markdown cell with the bot's reply. */
 async function insertReply(): Promise<boolean> {
   const cellWriter = writerForNotebook();
   if (!cellWriter) {
@@ -223,6 +267,11 @@ async function showPrompt(): Promise<boolean> {
 
 export function activate(context: vscode.ExtensionContext) {
   const push = context.subscriptions.push.bind(context.subscriptions);
+
+  push(vscode.commands.registerCommand(
+    "bot-typist.create-untitled-notebook",
+    createUntitledNotebook,
+  ));
 
   push(vscode.commands.registerCommand(
     "bot-typist.insert-reply",

@@ -30,12 +30,28 @@
     },
     "commands": [
       {
+        "command": "bot-typist.create-untitled-notebook",
+        "title": "Create: New Jupyter Notebook (for chat)"
+      },
+      {
         "command": "bot-typist.insert-reply",
         "title": "Bot: Insert Reply"
       },
       {
         "command": "bot-typist.show-prompt",
         "title": "Bot: Show Prompt"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "bot-typist.insert-reply",
+        "key": "ctrl+alt-enter",
+        "when": "inputFocus && notebookEditorFocused && notebookCellType == 'markup' && notebookCellEditable"
+      },
+      {
+        "command": "bot-typist.insert-reply",
+        "key": "cmd-enter",
+        "when": "inputFocus && notebookEditorFocused && notebookCellType == 'markup' && notebookCellEditable"
       }
     ]
   },
