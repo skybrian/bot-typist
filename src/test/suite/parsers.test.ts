@@ -1,6 +1,6 @@
 import assert = require("assert");
-import { splitCells } from "../../lib/parsers";
-import { CellWriter, DONE, Reader, ReadResult } from "../../lib/streams";
+import { CellWriter, splitCells } from "../../lib/parsers";
+import { DONE, Reader, ReadResult } from "../../lib/streams";
 
 class TestReader implements Reader {
   private chunks: string[];

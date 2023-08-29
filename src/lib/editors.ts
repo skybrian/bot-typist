@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { CellWriter } from "./streams";
+import { CellWriter } from "./parsers";
 
 /**
  * Types some text into the current document at the cursor.

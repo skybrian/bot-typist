@@ -1,6 +1,5 @@
-import * as child_process from "child_process";
-
 import { Completer } from "./async";
+import { Readable } from "stream";
 
 export const DONE = Symbol("DONE");
 
@@ -9,7 +8,7 @@ export type ReadResult = string | typeof DONE;
 export interface Reader {
   /**
    * Receives the next chunk of data from a stream. Blocks until it's available.
-   * 
+   *
    * @returns the next chunk or DONE if there are no more.
    */
   read(): Promise<ReadResult>;
@@ -26,208 +25,111 @@ export interface Writer {
 }
 
 export interface WriteCloser<T> extends Writer {
-  /**
-   * Signals that the stream is finished. Blocks until acknowledged.
-   */
+  /** Signals that the stream is finished. Blocks until acknowledged. */
   close(): Promise<T>;
 }
 
-export interface CellWriter extends WriteCloser<boolean> {
-  startCodeCell(): Promise<boolean>;
-  startMarkdownCell(): Promise<boolean>;
-}
+/** An async function that reads from a stream (such as a parser). */
+export type ReadFunction<T> = (input: Reader) => Promise<T>;
 
-/**
- * An async function that reads a stream.
- */
-export type Parser<T> = (reader: Reader) => Promise<T>;
-
-/**
- * A writer that sends data to a parse function. The parser blocks on read()
- * calls until the writer sends data, and the writer blocks on write() calls
- * until the the parser reads the data or disconnects.
- * 
- * The parser can disconnect at any time by returning or throwing.
- */
-export class ParserWriter<T> implements WriteCloser<T> {
-
-  #writesDone = false;
-
-  /** Resolves to true if the parser called read() or false if it disconnected. */
-  #parserWaiting = new Completer<boolean>();
-  #nextWrite = new Completer<ReadResult>();
-
-  #parseResult = new Completer<T>();
-
-  constructor(parse: Parser<T>) {
-
-    let isReading = false;
-    const reader: Reader = {
-      read:  async (): Promise<ReadResult> => {
-        if (isReading) {
-          throw new Error("Already reading");
-        } else if (this.#writesDone) {
-          return DONE;
-        }
-
-        isReading = true;
-        this.#parserWaiting.resolve(true);
-        try {
-          const result = await this.#nextWrite.promise;
-          this.#nextWrite = new Completer<ReadResult>();
-          return result;
-        } finally {
-          isReading = false;
-        }
-      }
-    };
-
-    parse(reader).then((result) => {
-      this.#parseResult.resolve(result);
-    }).catch((err) => {
-      this.#parseResult.reject(err);
-    }).finally(() => {
-      this.#parserWaiting.resolve(false);
-    });
-  }
-
-  #sending = false;
-
-  async #send(data: ReadResult): Promise<boolean> {
-    if (this.#sending) {
-      throw new Error("Already writing");
+/** Reads an entire stream into a string. */
+export const readAll: ReadFunction<string> = async (
+  r: Reader,
+): Promise<string> => {
+  let output = "";
+  while (true) {
+    const chunk = await r.read();
+    if (chunk === DONE) {
+      return output;
     }
+    output += chunk;
+  }
+};
 
-    this.#sending = true;
-    try {
-      if (!await this.#parserWaiting.promise) {
-        return false; // disconnected
+/**
+ * Copies a stream to an async function. Completes when the function does.
+ *
+ * The function doesn't have to read the entire stream before returning.
+ * The Readable will be destroyed whenever the function exits.
+ *
+ * If the stream emits an error, the next read() call will throw. The error
+ * will be ignored if the function never calls read() again.
+ *
+ * @return the result of the task.
+ * @throws if the ReadFunction throws.
+ */
+export async function copyStream<T>(
+  source: Readable,
+  dest: ReadFunction<T>,
+): Promise<T> {
+  let currentRead: Completer<ReadResult> | null = null;
+
+  const onReadable = () => {
+    if (currentRead) {
+      const chunk = source.read();
+      if (chunk) {
+        currentRead.resolve(chunk.toString());
+        currentRead = null;
       }
-      this.#parserWaiting = new Completer<boolean>();
-      this.#nextWrite.resolve(data);
-      if (data === DONE) {
-        this.#writesDone = true;
-      }
-      return true;
-    } finally {
-      this.#sending = false;
     }
   };
+  source.on("readable", onReadable);
 
-  /**
-   * Sends a chunk of data to the parser. Blocks until the parser
-   * reads it or exits.
-   * @returns false if the parse function exited.
-   */
-  write(data: string): Promise<boolean> {
-    return this.#send(data);
-  }
+  let streamEnded = false;
 
-  /**
-   * Signals the end the input stream to the parser.
-   * @returns the result of the parse function.
-   * @throws if the parse function threw.
-   */
-  close(): Promise<T> {
-    this.#send(DONE);
-    return this.#parseResult.promise;
-  }
-}
-
-/**
- * Runs an external command and sends stdout to a Writer.
- * Returns true if the command finished without being interrupted.
- * Doesn't close the writer.
- */
-export function writeStdout(
-  dest: Writer,
-  command: string,
-  args: string[],
-  options?: { stdin?: string },
-): Promise<boolean> {
-  return new Promise((resolve, reject) => {
-    const child = child_process.spawn(command, args);
-
-    let lastAction = Promise.resolve(true);
-
-    let shuttingDown = false;
-    let error: unknown;
-
-    const stop = (msg?: string, error?: unknown) => {
-      if (shuttingDown) {
-        return; // already shutting down
-      }
-      shuttingDown = true;
-
-      if (msg) {
-        console.error("writeStdout:", msg, error);
-        if (!error) {
-          error = new Error(msg);
-        }
-      }
-
-      error = error;
-
-      // Resolve or reject after all writes are done (or skipped).
-      lastAction = lastAction.then(async (ok: boolean) => {
-        if (error) {
-          throw error;
-        }
-        resolve(ok);
-        return ok;
-      }).catch((err: unknown) => {
-        reject(err);
-        return false;
-      });
-
-      child.kill();
-    };
-
-    // Send stdin
-    if (options && options.stdin) {
-      child.stdin.write(options.stdin, (err) => {
-        if (err) {
-          stop("error writing to stdin of external command", err);
-        }
-      });
-      child.stdin.end();
+  const onEnd = () => {
+    streamEnded = true;
+    if (currentRead) {
+      currentRead.resolve(DONE);
+      currentRead = null;
     }
+  };
+  source.once("end", onEnd);
 
-    // Schedule writes to stdout in the order received
-    child.stdout.on("data", (data) => {
-      if (shuttingDown) {
-        return; // don't schedule any more writes
+  let streamError: Error | null = null;
+
+  const onError = (error: Error) => {
+    streamError = error;
+    if (currentRead) {
+      currentRead.reject(error);
+      currentRead = null;
+    }
+  };
+  source.once("error", onError);
+
+  const adapter: Reader = {
+    read(): Promise<ReadResult> {
+      if (currentRead) {
+        throw new Error("previous read still in progress");
       }
-      lastAction = lastAction.then(async (ok: boolean) => {
-        return ok && !error && await dest.write(data.toString());
-      });
-    });
 
-    // Stop on any error
-    child.stderr.on("data", (data) => {
-      stop(`stderr: ${data}`);
-    });
+      currentRead = new Completer<ReadResult>();
+      const result = currentRead.promise;
 
-    child.on("error", (err) => {
-      stop(undefined, err);
-    });
-
-    child.on("exit", (code, signal) => {
-      if (signal) {
-        stop(`External command was killed by signal ${signal}`);
-      } else if (code !== 0) {
-        stop(`External command exited with code ${code}`);
-      }
-    });
-
-    child.on("close", (code, signal) => {
-      if (signal) {
-        stop(`External command was killed by signal ${signal}`);
-      } else if (code !== 0) {
-        stop(`External command exited with code ${code}`);
+      if (streamEnded) {
+        currentRead.resolve(DONE);
+        currentRead = null;
+      } else if (streamError) {
+        currentRead.reject(streamError);
+        currentRead = null;
       } else {
-        stop();
+        const chunk = source.read();
+        if (chunk !== null) {
+          currentRead.resolve(chunk.toString());
+          currentRead = null;
+        }
       }
-    });
-  });
+
+      return result;
+    },
+  };
+
+  try {
+    return await dest(adapter);
+  } finally {
+    source.removeListener("readable", onReadable);
+    source.removeListener("end", onEnd);
+    source.removeListener("error", onError);
+    source.destroy();
+  }
 }

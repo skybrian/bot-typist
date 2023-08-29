@@ -1,10 +1,9 @@
 import * as vscode from "vscode";
-import * as child_process from "child_process";
-import * as util from "util";
 
 import { getActiveCell, writerForNotebook } from "./lib/editors";
 import { splitCells } from "./lib/parsers";
-import { ParserWriter, Writer, writeStdout } from "./lib/streams";
+import { ChildPipe } from "./lib/processes";
+import { readAll } from "./lib/streams";
 
 function getCommandPath() {
   return vscode.workspace.getConfiguration("bot-typist").get<string>(
@@ -24,36 +23,34 @@ enum ConfigState {
 async function checkCommandPath(
   path: string | undefined,
 ): Promise<ConfigState> {
-  console.log("checkConfig called");
-
   if (path === undefined) {
     return ConfigState.unconfigured;
   }
 
-  const execFile = util.promisify(child_process.execFile);
-
+  let child: ChildPipe<string> | undefined;
   try {
-    const { stdout, stderr } = await execFile(path, ["--version"], {
-      timeout: 2000,
-    });
-
-    if (stderr) {
-      console.log(`llm error: '${stdout}'`);
-      return ConfigState.commandDidntRun;
-    }
-
-    console.log(`llm output: '${stdout}'`);
-    return ConfigState.ok;
+    child = new ChildPipe(path, ["--version"], readAll);
   } catch (e) {
-    if (typeof e === "object" && e !== null && "signal" in e) {
-      console.log(`llm error: ${e} signal: ${e.signal}`);
-      if (e.signal === "SIGTERM") {
-        return ConfigState.commandTimedOut;
-      }
-      return ConfigState.commandDidntRun;
-    }
     console.log(`llm error: ${e}`);
     return ConfigState.commandNotFound;
+  }
+
+  const TIMEOUT = Symbol("timeout");
+  const timeout = new Promise((_, reject) => setTimeout(() => reject(TIMEOUT), 2000));
+
+  try {
+    const first = await Promise.race([child.close(), timeout]);
+
+    if (first === TIMEOUT) {
+      child.kill();
+      return ConfigState.commandTimedOut;
+    }
+
+    console.log(`llm --version output: ${first}`);
+    return ConfigState.ok;
+  } catch (e) {
+    console.log(`llm error: ${e}`);
+    return ConfigState.commandDidntRun;
   }
 }
 
@@ -192,14 +189,24 @@ async function createUntitledNotebook(): Promise<boolean> {
   return true;
 }
 
-/** If in a notebook cell, inserts a new markdown cell with the bot's reply. */
+const systemPrompt =
+`You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
+You can reply with a mixture of Markdown and Python. Here is an example of how to include
+some Python code in a reply:
+
+%python
+print("hello!")
+%markdown
+
+To display an image in the notebook, write a Python expression that evaluates to the image object.
+`;
+
+/** If in a notebook cell, inserts cells below with the bot's reply. */
 async function insertReply(): Promise<boolean> {
   const cellWriter = writerForNotebook();
   if (!cellWriter) {
     return false;
   }
-
-  const cellSplitter = new ParserWriter(splitCells(cellWriter));
 
   const prompt = choosePrompt();
   if (!prompt) {
@@ -214,34 +221,16 @@ async function insertReply(): Promise<boolean> {
     );
     return false;
   }
-
-  const systemPrompt =
-    `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
-
-Replies consist of one or more cells. Before writing anything else, always write
-'%markdown' or '%python' on a line by itself, to indicate the cell type.
-
-When writing Python code, first write a Markdown cell explaining what you're doing,
-followed by the Python code in a separate cell.
-
-To display an image, write an expression that evaluates to the image.
-`;
   
   try {
-    await writeStdout(
-      cellSplitter,
-      llmPath,
-      ["--system", systemPrompt],
-      {
-        stdin: prompt,
-      },
-    );
-    console.log("command done");
+    const stdin = new ChildPipe(llmPath, ["--system", systemPrompt], splitCells(cellWriter));
+    await stdin.write(prompt);
+    await stdin.close();
+
     await cellWriter.startMarkdownCell();
     return true;
   } finally {
     await cellWriter.close();
-    console.log("notebook writer closed");
   }
 }
 

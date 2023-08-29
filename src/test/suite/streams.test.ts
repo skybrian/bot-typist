@@ -1,141 +1,57 @@
 import * as assert from "assert";
-import { DONE, ParserWriter, Reader, ReadResult, Writer, writeStdout } from "../../lib/streams";
+import { Readable } from "stream";
+import { copyStream, Reader, DONE } from "../../lib/streams";
 
-export class StringWriter implements Writer {
-  buf = "";
-
-  public async write(data: string): Promise<boolean> {
-    this.buf += data;
-    return true;
-  }
-
-  public async end(): Promise<boolean> {
-    return true;
-  }
-}
-
-export class CancellingWriter implements Writer {
-  public async write(data: string): Promise<boolean> {
-    return false;
-  }
-
-  public async end(): Promise<boolean> {
-    return true;
-  }
-}
-
-describe("writeStdout", () => {
-  it("writes a command's output to the writer", async () => {
-    const buf = new StringWriter();
-    assert.ok(await writeStdout(buf, "echo", ["Hello, world!"]));
-    assert.strictEqual(buf.buf, "Hello, world!\n");
-  });
-
-  it("returns false if the write is cancelled", async () => {
-    const buf = new CancellingWriter();
-    assert.equal(false, await writeStdout(buf, "echo", ["Hello, world!"]));
-  });
-
-  it("runs a command that takes input on stdin", async () => {
-    const buf = new StringWriter();
-    assert.ok(await writeStdout(buf, "cat", [], { stdin: "Hello, world!" }));
-    assert.strictEqual(buf.buf, "Hello, world!");
-  });
-
-  it("returns false if the write is cancelled, with input on stdin", async () => {
-    const buf = new CancellingWriter();
-    assert.equal(false, await writeStdout(buf, "cat", [], { stdin: "Hello, world!" }));
-  });
-
-  it("rejects if the command doesn't exist", async () => {
-    const buf = new StringWriter();
-    assert.rejects(writeStdout(buf, "this-command-does-not-exist", []));
-  });
-});
-
-const pushAll = (dest: ReadResult[]) => async (reader: Reader): Promise<boolean> => {
+const collectChunks = async (r: Reader): Promise<string[]> => {
+  const chunks = [] as string[];
   while (true) {
-    const chunk = await reader.read();
-    dest.push(chunk);
+    const chunk = await r.read();
     if (chunk === DONE) {
-      return true;
+      return chunks;
     }
+    chunks.push(chunk);
   }
 };
 
-describe("ParserWriter", () => {
-  describe("for zero writes", () => {
-    const reads = [] as ReadResult[];
-    const writer = new ParserWriter(pushAll(reads));
+describe('copyStream', () => {
+  it('sends each chunk to the read function', async function() {
+    const input = ['hello', 'world'];
+    const source = Readable.from(input);
 
-    it("doesn't send anything at the start", async () => {
-      assert.strictEqual(reads.length, 0);
-    });
+    const output = await copyStream(source, collectChunks);
 
-    it("sends DONE when closed", async () => {
-      assert.ok(await writer.close());
-      assert.deepStrictEqual(reads, [DONE]);
-    });
+    assert.deepStrictEqual(output, input);
+    assert.ok(source.destroyed);
   });
 
-  describe("for one write", async () => {
-    const reads = [] as ReadResult[];
-    const writer = new ParserWriter(pushAll(reads));
+  it('stops early when the read function returns early', async function() {
+    const input = ['hello', 'world'];
+    const source = Readable.from(input);
 
-    it("sends the write", async () => {
-      assert.ok(await writer.write("hello!"));
-      await Promise.resolve();
-      assert.deepStrictEqual(reads, ["hello!"]);
+    const first = await copyStream(source, async (r) => {
+      return await r.read();
     });
 
-    it("sends DONE when closed", async () => {
-      assert.ok(await writer.close());
-      assert.deepStrictEqual(reads, ["hello!", DONE]);
-    });
+    assert.strictEqual(first, 'hello');
+    assert.ok(source.destroyed);
   });
 
-  describe("for two writes", async () => {
-    const reads = [] as ReadResult[];
-    const writer = new ParserWriter(pushAll(reads));
+  it("sends a stream error to the read function", async () => {
+      const source = new Readable({
+          read() {}
+      });
 
-    it("sends the writes", async () => {
-      assert.ok(await writer.write("hello!"));
-      await Promise.resolve();
-      assert.deepStrictEqual(reads, ["hello!"]);
-      assert.ok(await writer.write("goodbye!"));
-      await Promise.resolve();
-      assert.deepStrictEqual(reads, ["hello!", "goodbye!"]);
-    });
+      const pending = copyStream(source, async (r) => {
+        await r.read(); // should throw
+        return "shouldn't get here";
+      });
 
-    it("sends DONE when closed", async () => {
-      assert.ok(await writer.close());
-      assert.deepStrictEqual(reads, ["hello!", "goodbye!", DONE]);
-    });
-  });
+      source.emit('error', 'test error');
 
-  describe("write", () => {
-    it("returns false if the parser exited", async () => {
-      const writer = new ParserWriter(async (_reader) => {
+      await assert.rejects(pending, (err) => {
+        assert.strictEqual(err, 'test error');
         return true;
       });
-      assert.strictEqual(false, await writer.write("hello!"));
+      assert.ok(source.destroyed);
     });
-  });
-
-  describe("close", () => {
-    it("returns the value from the parser", async () => {
-      const writer = new ParserWriter(async (_reader) => {
-        return "whatever";
-      });  
-      assert.strictEqual("whatever", await writer.close());
-    });
-
-    it("throws an error when the parser throws", async () => {
-      const writer = new ParserWriter(async (_reader) => {
-        await Promise.resolve();
-        throw new Error("parser error");
-      });  
-      await assert.rejects(writer.close());
-    });
-  });
 });
