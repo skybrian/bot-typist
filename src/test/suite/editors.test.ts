@@ -1,7 +1,7 @@
 import * as assert from "assert";
 import * as vscode from "vscode";
 
-import { writerForNotebook } from "../../lib/editors";
+import { NotebookWriter } from "../../lib/editors";
 
 interface Cell {
   lang: string;
@@ -71,7 +71,7 @@ function checkCursor(
   assert.strictEqual(ed.selection.active.character, expectedCharacter);
 }
 
-describe("writerForNotebook", () => {
+describe("NotebookWriter", () => {
   before(async function () {
     await vscode.commands.executeCommand("workbench.action.closeAllEditors");
 
@@ -92,10 +92,8 @@ describe("writerForNotebook", () => {
   });
 
   it("creates a writer for an active notebook cell", async function () {
-    const w = writerForNotebook();
-    assert.ok(w);
-    assert.ok(w.write);
-    this.writer = w;
+    const cell = this.noteEd.notebook.cellAt(0);
+    this.writer = new NotebookWriter(cell);
   });
 
   describe("write", () => {
@@ -142,10 +140,10 @@ describe("writerForNotebook", () => {
   });
 
   describe("close", () => {
-    it("close doesn't change the cells or cursor", async function () {
+    it("close adds a markdown cell for new input", async function () {
       assert.ok(await this.writer.close());
-      checkCells(["First line", "Next line", "Cell 2\n"]);
-      checkCursor(2, 1, 0);
+      checkCells(["First line", "Next line", "Cell 2", ""]);
+      checkCursor(3, 0, 0);
     });
   });
 });

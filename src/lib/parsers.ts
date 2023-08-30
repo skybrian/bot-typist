@@ -1,8 +1,14 @@
-import { DONE, Reader, ReadFunction, WriteCloser } from "./streams";
+import { DONE, ReadFunction, WriteCloser } from "./streams";
 
 export interface CellWriter extends WriteCloser<boolean> {
   startCodeCell(): Promise<boolean>;
   startMarkdownCell(): Promise<boolean>;
+}
+
+enum State {
+  running,
+  cancelled,
+  done
 }
 
 /**
@@ -15,9 +21,8 @@ export const splitCells =
   (output: CellWriter): ReadFunction<void> => async (input) => {
     let buffer = "";
 
-    // Parse functions return false when there is no more input or output is cancelled.
-
     // Reads more input into the buffer.
+    // Returns false when writing is cancelled.
     // Postcondition when true: buffer.length is greater than before.
     const pull = async (): Promise<boolean> => {
       while (true) {
@@ -35,51 +40,54 @@ export const splitCells =
       return;
     }
 
+    // Starts writing a cell.
+    // Returns false if writing has been cancelled.
     const sendCellStart = async (rest: string): Promise<boolean> => {
       switch (rest.trim()) {
         case "markdown":
           console.log("starting markdown cell");
-          return output.startMarkdownCell();
+          return await output.startMarkdownCell();
         case "python":
           console.log("starting code cell");
-          return output.startCodeCell();
+          return await output.startCodeCell();
         default:
           console.log(`Unknown cell type: ${rest.trim()}`);
-          return output.write(`%${rest}`);
+          return await output.write(`%${rest}`);
       }
     };
 
     // Reads a cell header line from the input and sets the cell type.
     // Precondition: buffer[0] is '%' at the start of a line.
-    // Postcondition when true: buffer[0] is the start of the next line.
-    const parseHeader = async (): Promise<boolean> => {
+    // Postcondition if still running: buffer[0] is the start of the next line.
+    const parseHeader = async (): Promise<State> => {
       while (!buffer.includes("\n")) {
         if (!await pull()) {
-          await sendCellStart(buffer);
-          return false;
+          // The input ended with a header line.
+          // Ignore it and don't start a new cell.
+          return State.done;
         }
       }
 
       const end = buffer.indexOf("\n");
       const rest = buffer.slice(1, end);
       buffer = buffer.slice(end + 1);
-      return sendCellStart(rest);
+      return await sendCellStart(rest) ?  State.running : State.cancelled;
     };
 
     // Sends one line of text.
     // Precondition: buffer contains the start of a line (not empty).
-    // Postcondition when true: buffer contains the start of the next line.
-    const sendLine = async (): Promise<boolean> => {
+    // Postcondition if still running: buffer contains the start of the next line.
+    const sendLine = async (): Promise<State> => {
       if (buffer[0] === "%") {
         return parseHeader();
       }
       while (!buffer.includes("\n")) {
         if (!await output.write(buffer)) {
-          return false;
+          return State.cancelled;
         }
         buffer = "";
         if (!await pull()) {
-          return false;
+          return State.done;
         }
       }
       const nextStart = buffer.indexOf("\n") + 1;
@@ -87,13 +95,23 @@ export const splitCells =
       buffer = buffer.slice(nextStart);
 
       if (!await output.write(lineEnd)) {
-        return false;
+        return State.cancelled;
       }
       if (buffer.length > 0) {
-        return true;
+        return State.running;
       }
-      return pull();
+      return await pull() ? State.running : State.done;
     };
 
-    while (await sendLine()) {}
+    while (true) {
+      switch (await sendLine()) {
+        case State.running:
+          continue;
+        case State.cancelled:
+          return;
+        case State.done:
+          await output.close();
+          return;
+      }
+    }
   };

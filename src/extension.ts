@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 
-import { getActiveCell, writerForNotebook } from "./lib/editors";
+import { NotebookWriter, getActiveCell } from "./lib/editors";
 import { splitCells } from "./lib/parsers";
 import { ChildPipe } from "./lib/processes";
 import { readAll } from "./lib/streams";
@@ -203,8 +203,8 @@ To display an image in the notebook, write a Python expression that evaluates to
 
 /** If in a notebook cell, inserts cells below with the bot's reply. */
 async function insertReply(): Promise<boolean> {
-  const cellWriter = writerForNotebook();
-  if (!cellWriter) {
+  let cell = getActiveCell();
+  if (!cell) {
     return false;
   }
 
@@ -222,16 +222,12 @@ async function insertReply(): Promise<boolean> {
     return false;
   }
   
-  try {
-    const stdin = new ChildPipe(llmPath, ["--system", systemPrompt], splitCells(cellWriter));
-    await stdin.write(prompt);
-    await stdin.close();
-
-    await cellWriter.startMarkdownCell();
-    return true;
-  } finally {
-    await cellWriter.close();
-  }
+  const writer = new NotebookWriter(cell);
+  
+  const stdin = new ChildPipe(llmPath, ["--system", systemPrompt], splitCells(writer));
+  await stdin.write(prompt);
+  await stdin.close();
+  return true;
 }
 
 /** Open a new editor tab with the prompt used for the current position. */

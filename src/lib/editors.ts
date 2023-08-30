@@ -53,13 +53,7 @@ export function getActiveCell(): vscode.NotebookCell | undefined {
   return ed.notebook.cellAt(sel.start);
 }
 
-/** Returns a CellWriter that inserts cells into the active notebook, below the current cell. */
-export function writerForNotebook(): NotebookWriter | undefined {
-  let cell = getActiveCell();
-  return cell ? new NotebookWriter(cell) : undefined;
-}
-
-class NotebookWriter implements CellWriter {
+export class NotebookWriter implements CellWriter {
   #cell: vscode.NotebookCell; 
   
   #decorationType = vscode.window.createTextEditorDecorationType({
@@ -221,7 +215,14 @@ class NotebookWriter implements CellWriter {
   }
 
   async close(): Promise<boolean> {
+    if (this.#cancelled) {
+      return false;
+    }
+    if (this.#disposables.length === 0) {
+      return true;
+    }
+    await this.startMarkdownCell();
     this.cleanup();
-    return !this.#cancelled;
+    return true;
   }
 }
