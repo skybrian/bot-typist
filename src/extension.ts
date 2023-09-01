@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
-import { NotebookWriter, getActiveCell } from "./lib/editors";
-import { splitCells } from "./lib/parsers";
+import { NotebookWriter, getActiveCell, editActiveCell } from "./lib/editors";
+import { handleBotResponse } from "./lib/parsers";
 import { ChildPipe } from "./lib/processes";
 import { readAll } from "./lib/streams";
 
@@ -111,10 +111,6 @@ function choosePrompt(): string | undefined {
 }
 
 function decorateWhileEmpty(editor: vscode.TextEditor, placeholderText: string) {
-  if (editor.document.getText() !== '') {
-    return;
-  }
-
   const disposables = [] as vscode.Disposable[];
 
   const cleanup = () => {
@@ -133,17 +129,27 @@ function decorateWhileEmpty(editor: vscode.TextEditor, placeholderText: string) 
   });
   disposables.push(placeholder);
   
-  const fullRange = new vscode.Range(
-      editor.document.positionAt(0),
-      editor.document.positionAt(editor.document.getText().length)
-  );
-  editor.setDecorations(placeholder, [fullRange]);      
+  let decorated = false;
+  const renderDecoration = (doc: vscode.TextDocument) => {
+    if (doc !== editor.document) {
+      return;
+    }
+    if (editor.document.getText().length === 0) {
+      if (!decorated) {
+        const zero = editor.document.positionAt(0);
+        editor.setDecorations(placeholder, [new vscode.Range(zero, zero)]);
+        decorated = true;
+      }
+    } else {
+      editor.setDecorations(placeholder, []);
+      decorated = false;
+    }
+  };
+
+  renderDecoration(editor.document);
 
   disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
-    if (e.document === editor.document && e.document.getText() !== '') {
-      editor.setDecorations(placeholder, []);
-      cleanup();
-    }
+    renderDecoration(e.document);
   }));
 
   disposables.push(vscode.workspace.onDidCloseTextDocument((doc) => {
@@ -176,23 +182,21 @@ async function createUntitledNotebook(): Promise<boolean> {
 
   const doc = await vscode.workspace.openNotebookDocument('jupyter-notebook', data);
   await vscode.window.showNotebookDocument(doc);
-  
-  await vscode.commands.executeCommand("notebook.cell.edit");
-  
-  const ed = vscode.window.activeTextEditor;
+
+  const ed = await editActiveCell();
   if (!ed) {
-    console.log("createUntitledNotebook: no text editor");
+    console.log("createUntitledNotebook: couldn't edit cell");
     return false;
   }
+
   decorateWhileEmpty(ed, 'Type your question here and press Control+Alt Enter to get a response.');
-  
   return true;
 }
 
 const systemPrompt =
 `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
-You can reply with a mixture of Markdown and Python. Here is an example of how to include
-some Python code in a reply:
+You can reply with a mixture of Markdown and Python, but instead of using triple quotes
+for a Python code block, use the following format:
 
 %python
 print("hello!")
@@ -222,12 +226,17 @@ async function insertReply(): Promise<boolean> {
     return false;
   }
   
-  const writer = new NotebookWriter(cell);
-  
-  const stdin = new ChildPipe(llmPath, ["--system", systemPrompt], splitCells(writer));
-  await stdin.write(prompt);
-  await stdin.close();
-  return true;
+  try {
+    const writer = new NotebookWriter(cell);
+    
+    const stdin = new ChildPipe(llmPath, ["--system", systemPrompt], handleBotResponse(writer));
+    await stdin.write(prompt);
+    await stdin.close();
+    return true;
+  } catch (e) {
+    console.error(e);
+    return false;
+  }
 }
 
 /** Open a new editor tab with the prompt used for the current position. */

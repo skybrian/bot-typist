@@ -17,10 +17,9 @@ export async function typeText(
   // insert text
 
   const here = ed.selection.active;
-  const edit = new vscode.WorkspaceEdit();
-  edit.insert(ed.document.uri, here, newText);
-
-  if (!await vscode.workspace.applyEdit(edit)) {
+  if (!await ed.edit((builder) => {
+    builder.insert(here, newText);
+  })) {
     console.log(`typeText: applyEdit failed for: '${newText}'`);
     return false;
   }
@@ -53,9 +52,31 @@ export function getActiveCell(): vscode.NotebookCell | undefined {
   return ed.notebook.cellAt(sel.start);
 }
 
+function getEditorAfterNextChange(): Promise<vscode.TextEditor | undefined> {
+  return new Promise((resolve) => {
+    const disposable = vscode.window.onDidChangeActiveTextEditor((ed) => {
+      disposable.dispose();
+      resolve(ed);
+    });
+  });
+} 
+
+export async function editActiveCell(): Promise<vscode.TextEditor | undefined> {
+  const cell = getActiveCell();
+  if (!cell) {
+    return undefined;
+  }
+
+  const nextEditor = getEditorAfterNextChange();
+  await vscode.commands.executeCommand("notebook.cell.edit");  
+  const ed = await nextEditor;
+
+  return (ed && ed.document === cell.document) ? ed : undefined;
+}
+
 export class NotebookWriter implements CellWriter {
-  #cell: vscode.NotebookCell; 
-  
+  #cell: vscode.NotebookCell;
+
   #decorationType = vscode.window.createTextEditorDecorationType({
     after: {
       contentText: "...",
@@ -78,7 +99,7 @@ export class NotebookWriter implements CellWriter {
 
   constructor(cell: vscode.NotebookCell) {
     this.#cell = cell;
-    
+
     this.#disposables.push({
       dispose: () => {
         if (this.#decoratedEd) {
@@ -87,7 +108,14 @@ export class NotebookWriter implements CellWriter {
       }
     });
     this.#disposables.push(this.#decorationType);
-  }     
+
+    const ed = this.editor;
+    if (ed) {
+      this.decorate(ed);
+    } else {
+      this.cancel("No current editor.");
+    }
+  }
 
   private cleanup = () => {
     for (const disposable of this.#disposables) {
@@ -144,18 +172,19 @@ export class NotebookWriter implements CellWriter {
 
     const command = kind === vscode.NotebookCellKind.Markup ? "notebook.cell.insertMarkdownCellBelow" : "notebook.cell.insertCodeCellBelow";
     await vscode.commands.executeCommand(command);
-    await vscode.commands.executeCommand("notebook.cell.edit");
+
+    const ed = await editActiveCell();
+    if (!ed) {
+      console.log("couldn't edit new cell");
+      return false;
+    }
 
     const cell = getActiveCell();
-    if (!cell) {
+    if (!cell || cell.index !== this.#cell.index + 1 || cell.kind !== kind || cell.document !== ed.document) {
+      console.log("new cell is not the expected one");
       return false;
     }
     this.#cell = cell;
-
-    const ed = this.editor;
-    if (!ed) {
-      return false;
-    }
 
     this.decorate(ed);
     this.#insertedCell = true;
@@ -182,7 +211,7 @@ export class NotebookWriter implements CellWriter {
 
   async write(data: string): Promise<boolean> {
     if (!this.#insertedCell) {
-      if (!await this.insertCellBelow(vscode.NotebookCellKind.Markup)) {
+      if (!await this.startMarkdownCell()) {
         console.log("NotebookWriter.write: couldn't insert markdown cell.");
         return false;
       }

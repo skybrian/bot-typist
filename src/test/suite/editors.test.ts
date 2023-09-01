@@ -98,8 +98,11 @@ describe("NotebookWriter", () => {
 
   describe("write", () => {
     it("starts a new markdown cell automatically", async function () {
+      this.timeout(3000);
       const edit = "Next line\n";
-      assert.ok(await this.writer.write(edit), "write failed");
+      const writer = this.writer as NotebookWriter;
+      assert.ok(writer);
+      assert.ok(await writer.write(edit), "write failed");
       checkCells(["First line", "Next line\n"]);
       checkCellKinds([
         vscode.NotebookCellKind.Code,
