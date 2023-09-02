@@ -73,8 +73,6 @@ function checkCursor(
 
 describe("NotebookWriter", () => {
   before(async function () {
-    await vscode.commands.executeCommand("workbench.action.closeAllEditors");
-
     const noteEd = await setupNotebook([{
       lang: "python",
       text: "First line\n",
@@ -89,6 +87,10 @@ describe("NotebookWriter", () => {
     assert.ok(ed, "no active editor");
     ed.selection = new vscode.Selection(1, 0, 1, 0);
     this.ed = ed;
+  });
+
+  after(async function () {
+    await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
   });
 
   it("creates a writer for an active notebook cell", async function () {
