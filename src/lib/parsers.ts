@@ -11,7 +11,7 @@ enum State {
   done
 }
 
-class Scanner {
+export class Scanner {
   readonly _input: Reader;
   buffer = "";
 
