@@ -18,12 +18,30 @@
 			"preLaunchTask": "${defaultBuildTask}"
 		},
 		{
-			"name": "Extension Tests",
+			"args": [
+				"--timeout",
+				"999999",
+				"--colors",
+				"${workspaceFolder}/src/test/node/*.test.ts",
+				"-r",
+				"ts-node/register"
+			],
+			"internalConsoleOptions": "openOnSessionStart",
+			"name": "Node Tests",
+			"program": "${workspaceFolder}/node_modules/mocha/bin/_mocha",
+			"request": "launch",
+			"skipFiles": [
+				"<node_internals>/**"
+			],
+			"type": "node"
+		},
+		{
+			"name": "Electron Tests",
 			"type": "extensionHost",
 			"request": "launch",
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}",
-				"--extensionTestsPath=${workspaceFolder}/out/test/suite/index"
+				"--extensionTestsPath=${workspaceFolder}/out/test/vscode/index"
 			],
 			"outFiles": [
 				"${workspaceFolder}/out/test/**/*.js"
