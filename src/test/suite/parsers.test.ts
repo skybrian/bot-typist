@@ -95,6 +95,26 @@ describe("Scanner", () => {
     });
   });
 
+  describe("takeBlankLine", async () => {
+    it("returns false when there's no input", async () => {
+      const scanner = new Scanner(new TestReader([]));
+      assert.strictEqual(await scanner.takeBlankLine(), false);
+    });
+
+    it("returns false when the next line is not blank", async () => {
+      const scanner = new Scanner(new TestReader(["Hello, ", "world!\nMore text\n"]));
+      assert.strictEqual(await scanner.takeBlankLine(), false);
+      assert.strictEqual(scanner.buffer, "Hello, ");
+    });
+
+    it("returns the first blank line from input", async () => {
+      const scanner = new Scanner(new TestReader(["\n \nHello"]));
+      assert.strictEqual(await scanner.takeBlankLine(), "\n");
+      assert.strictEqual(await scanner.takeBlankLine(), " \n");
+      assert.strictEqual(scanner.buffer, "Hello");
+    });
+  });
+
   describe("startsWith", () => {
     it("returns false when there's no input", async () => {
       const scanner = new Scanner(new TestReader([]));
@@ -191,6 +211,16 @@ describe("handleBotResponse", () => {
       { lang: "python", text: "" },
       { lang: "python", text: "x = 1\n" },
       { lang: "markdown", text: "Hi!" },
+    ]);
+  });
+
+  it("removes blank lines at the start of a cell", async () => {
+    reader = new TestReader(["%python\n", "\n \nx = 1\n\ny = 2"]);
+
+    await handleBotResponse(writer)(reader);
+    writer.check([
+      { lang: "python", text: "" },
+      { lang: "python", text: "x = 1\ny = 2" },
     ]);
   });
 });
