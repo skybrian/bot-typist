@@ -1,4 +1,4 @@
-import { DONE, ReadFunction, Reader, WriteCloser } from "./streams";
+import { DONE, Reader, ReadFunction, WriteCloser } from "./streams";
 
 export interface CellWriter extends WriteCloser<boolean> {
   startCodeCell(): Promise<boolean>;
@@ -8,12 +8,12 @@ export interface CellWriter extends WriteCloser<boolean> {
 enum State {
   running,
   cancelled,
-  done
+  done,
 }
 
 enum CellType {
   markdown = "markdown",
-  python = "python"
+  python = "python",
 }
 
 /**
@@ -42,7 +42,7 @@ export class Scanner {
         return true;
       }
     }
-  };
+  }
 
   /**
    * Ensures that the buffer has the specified length, or more.
@@ -52,7 +52,7 @@ export class Scanner {
     while (this.buffer.length < n) {
       if (!await this.pull()) {
         return false;
-      }      
+      }
     }
     return true;
   }
@@ -61,7 +61,7 @@ export class Scanner {
    * Returns true if the buffer contains a newline.
    */
   get hasLine(): boolean {
-    return this.buffer.includes('\n');
+    return this.buffer.includes("\n");
   }
 
   /**
@@ -74,17 +74,17 @@ export class Scanner {
     }
     return this.buffer.startsWith(prefix);
   }
-  
+
   /** Clears and returns the buffer. */
   take(): string {
     const result = this.buffer;
-    this.buffer = '';
+    this.buffer = "";
     return result;
   }
 
   async takeCharIn(chars: string): Promise<string> {
     if (!await this.fillTo(1) || !chars.includes(this.buffer[0])) {
-      return '';
+      return "";
     }
     const result = this.buffer[0];
     this.buffer = this.buffer.slice(1);
@@ -92,7 +92,7 @@ export class Scanner {
   }
 
   async takeCharsIn(chars: string): Promise<string> {
-    let result = '';
+    let result = "";
     while (true) {
       const c = await this.takeCharIn(chars);
       if (!c) {
@@ -104,7 +104,7 @@ export class Scanner {
 
   async takeStartsWith(prefix: string): Promise<string> {
     if (!await this.startsWith(prefix)) {
-      return '';
+      return "";
     }
     const result = this.buffer.slice(0, prefix.length);
     this.buffer = this.buffer.slice(prefix.length);
@@ -129,17 +129,17 @@ export class Scanner {
     return line;
   }
 
-  async takeHeaderLine(): Promise<CellType | ''> {
-    if (!await this.startsWith('%')) {
-      return '';
+  async takeHeaderLine(): Promise<CellType | ""> {
+    if (!await this.startsWith("%")) {
+      return "";
     }
-    if (await this.takeStartsWith('%python\n')) {
+    if (await this.takeStartsWith("%python\n")) {
       return CellType.python;
     }
-    if (await this.takeStartsWith('%markdown\n')) {
+    if (await this.takeStartsWith("%markdown\n")) {
       return CellType.markdown;
     }
-    return '';
+    return "";
   }
 
   /**
@@ -165,7 +165,8 @@ export class Scanner {
   }
 }
 
-const cueChars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const cueChars =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 /**
  * Splits input into cells and sends them to the output.
@@ -196,13 +197,13 @@ export const handleBotResponse =
 
     const sendCue = async (): Promise<boolean> => {
       const cueStart = await scanner.takeCharsIn(cueChars);
-      if (cueStart && await scanner.takeStartsWith(': ')) {
-        // cue is already present        
-        return await output.write(cueStart + ': ');
+      if (cueStart && await scanner.takeStartsWith(": ")) {
+        // cue is already present
+        return await output.write(cueStart + ": ");
       }
       // add the cue
 
-      return await output.write('bot: ' + cueStart);
+      return await output.write("bot: " + cueStart);
     };
 
     // Sends one cell.
@@ -221,7 +222,7 @@ export const handleBotResponse =
       if (inMarkdown) {
         // send indentation and cue
 
-        const indent = await scanner.takeCharsIn(' \t');
+        const indent = await scanner.takeCharsIn(" \t");
         if (indent) {
           if (!await output.write(indent)) {
             return State.cancelled;
@@ -232,11 +233,13 @@ export const handleBotResponse =
           return State.cancelled;
         }
       }
-      
+
       while (true) {
         const cellType = await scanner.takeHeaderLine();
         if (cellType) {
-          return await sendCellStart(cellType) ? State.running : State.cancelled;
+          return await sendCellStart(cellType)
+            ? State.running
+            : State.cancelled;
         }
 
         // send chunks in line
@@ -256,10 +259,10 @@ export const handleBotResponse =
           console.trace("shouldn't get here");
           return State.cancelled;
         }
-  
+
         if (!await output.write(lineEnd)) {
           return State.cancelled;
-        } 
+        }
       }
     };
 
