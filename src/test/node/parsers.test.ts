@@ -197,21 +197,59 @@ describe("Scanner", () => {
   });
 });
 
+function concat(arbitraries: fc.Arbitrary<string>[]): fc.Arbitrary<string> {
+  return fc.tuple(...arbitraries).map(strings => strings.join(''));
+}
+
+const anyWhitespace = fc.stringOf(fc.constantFrom(" ", "\t"));
+const anyBlankLine = anyWhitespace.map((s) => s + "\n");
+const anyBlankLines = fc.array(anyBlankLine, {minLength: 1}).map((lines) => lines.join(""));
+
+const anyTrimmedText = fc.unicodeString({minLength: 1}).map((s) => s.trim()).filter((s) => s.length > 0);
+const anyNonBlankLine = concat([anyWhitespace, anyTrimmedText, anyWhitespace]).map((s) => s + "\n");
+
+const anyParagraph = fc.array(anyNonBlankLine, {minLength: 1}).map((lines) => lines.join(""));
+const anyMoreParagraphs = fc.array(fc.tuple(anyBlankLines, anyParagraph)).map((blocks) => blocks.map(([blank, para]) => blank + para).join(""));
+const anyCellText = fc.tuple(anyParagraph, anyMoreParagraphs).map(([para, more]) => para + more);
+
 interface Cell {
   lang: string;
   text: string;
 }
 
+const anyCell = fc.record({
+  lang: fc.constantFrom("python", "markdown"),
+  text: anyCellText,
+});
+
+const anyCellAndInput: fc.Arbitrary<[Cell, string]> = fc.tuple(anyBlankLines, anyCell).map(([before, cell]) => {
+  const header = `%${cell.lang}\n`;
+  return [cell, header + before + cell.text];
+});
+
+const anyCellsAndInput: fc.Arbitrary<[Cell[], string]> = fc.array(anyCellAndInput).map((cellsAndInput) => {
+  const cells = cellsAndInput.map(([cell, _]) => cell);
+  const input = cellsAndInput.map(([_, input]) => input).join("");
+  return [cells, input];
+});
+
+const anyCellsAndChunks = fc.tuple(anyCellsAndInput, fc.boolean()).chain(([[cells, input], splitChoice]) => {
+  const chunks = splitChoice ? input.split("") : [input];
+  return fc.tuple(fc.constant(cells), fc.constant(chunks));
+});
+
 class TestCellWriter implements CellWriter {
-  cells: Cell[] = [{ lang: "python", text: "" }];
+  cells: Cell[] = [];
   done = false;
 
   async write(text: string): Promise<boolean> {
     if (this.done) {
       throw new Error("write after done");
     }
-    const cell = this.cells[this.cells.length - 1];
-    cell.text += text;
+    if (this.cells.length === 0) {
+      await this.startMarkdownCell();
+    }
+    this.cells[this.cells.length - 1].text += text;
     return true;
   }
 
@@ -238,52 +276,24 @@ class TestCellWriter implements CellWriter {
     this.done = true;
     return true;
   }
-
-  check(expected: Cell[]) {
-    expect(this.cells).toEqual(expected);
-  }
 }
 
 describe("handleBotResponse", () => {
-  let reader = new TestReader([]);
-  let writer = new TestCellWriter();
-
-  beforeEach(async () => {
-    reader = new TestReader([]);
-    writer = new TestCellWriter();
-  });
 
   it("does nothing when there's no input", async () => {
+    const reader = new TestReader([]);
+    const writer = new TestCellWriter();
     await handleBotResponse(writer)(reader);
-    writer.check([{ lang: "python", text: "" }]);
+    expect(writer.cells).toEqual([]);
   });
 
-  it("copies text as-is when there are no cell markers", async () => {
-    reader = new TestReader(["Hello, ", "world!"]);
-    await handleBotResponse(writer)(reader);
-    writer.check([
-      { lang: "python", text: "Hello, world!" },
-    ]);
-  });
-
-  it("starts new cells for cell markers", async () => {
-    reader = new TestReader(["%python\n", "x = 1\n", "%markdown\n", "Hi!"]);
-
-    await handleBotResponse(writer)(reader);
-    writer.check([
-      { lang: "python", text: "" },
-      { lang: "python", text: "x = 1\n" },
-      { lang: "markdown", text: "Hi!" },
-    ]);
-  });
-
-  it("removes blank lines at the start of a cell", async () => {
-    reader = new TestReader(["%python\n", "\n \nx = 1\n\ny = 2"]);
-
-    await handleBotResponse(writer)(reader);
-    writer.check([
-      { lang: "python", text: "" },
-      { lang: "python", text: "x = 1\ny = 2" },
-    ]);
+  it("parses chunks into cells", async function () {
+    this.timeout(10000);
+    await fc.assert(fc.asyncProperty(anyCellsAndChunks, async ([cells, chunks]) => {
+      const reader = new TestReader(chunks);
+      const writer = new TestCellWriter();
+      await handleBotResponse(writer)(reader);
+      expect(writer.cells).toEqual(cells);
+    }));
   });
 });

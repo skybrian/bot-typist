@@ -133,10 +133,8 @@ export const handleBotResponse =
     const sendCellStart = async (rest: string): Promise<boolean> => {
       switch (rest.trim()) {
         case "markdown":
-          console.log("starting markdown cell");
           return await output.startMarkdownCell();
         case "python":
-          console.log("starting code cell");
           return await output.startCodeCell();
         default:
           console.log(`Unknown cell type: ${rest.trim()}`);
@@ -159,16 +157,16 @@ export const handleBotResponse =
     };
 
     // Sends one cell.
-    // Precondition: scanner at start of cell.
-    // Postcondition if still running: scanner at start of next cell.
+    // Precondition: scanner is at the start of cell, just after the header.
+    // Postcondition if still running: scanner is after the header of the next cell.
     const handleCell = async (): Promise<State> => {
+      // skip blank lines at start of cell
+      while (await scanner.takeBlankLine()) {}
+
       while (true) {
         if (await scanner.startsWith('%')) {
           return handleHeader();
         }
-
-        // skip blank lines at start of cell
-        while (await scanner.takeBlankLine()) {}
 
         // send chunks in line
         while (!scanner.hasLine) {
