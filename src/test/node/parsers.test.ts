@@ -197,20 +197,29 @@ describe("Scanner", () => {
   });
 });
 
-function concat(arbitraries: fc.Arbitrary<string>[]): fc.Arbitrary<string> {
-  return fc.tuple(...arbitraries).map(strings => strings.join(''));
+function concat(...args: fc.Arbitrary<string>[]): fc.Arbitrary<string> {
+  return fc.tuple(...args).map(strings => strings.join(''));
 }
 
 const anyWhitespace = fc.stringOf(fc.constantFrom(" ", "\t"));
-const anyBlankLine = anyWhitespace.map((s) => s + "\n");
-const anyBlankLines = fc.array(anyBlankLine, {minLength: 1}).map((lines) => lines.join(""));
+const anyBlankLine = concat(anyWhitespace, fc.constant('\n'));
+const anyBlankLines = fc.stringOf(anyBlankLine, {minLength: 1});
 
 const anyTrimmedText = fc.unicodeString({minLength: 1}).map((s) => s.trim()).filter((s) => s.length > 0);
-const anyNonBlankLine = concat([anyWhitespace, anyTrimmedText, anyWhitespace]).map((s) => s + "\n");
+const anyNonBlankLine = concat(anyWhitespace, anyTrimmedText, anyWhitespace, fc.constant('\n'));
 
-const anyParagraph = fc.array(anyNonBlankLine, {minLength: 1}).map((lines) => lines.join(""));
-const anyMoreParagraphs = fc.array(fc.tuple(anyBlankLines, anyParagraph)).map((blocks) => blocks.map(([blank, para]) => blank + para).join(""));
-const anyCellText = fc.tuple(anyParagraph, anyMoreParagraphs).map(([para, more]) => para + more);
+const anyLetter = fc.constantFrom(...Array.from("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"));
+const anyDigit = fc.constantFrom(...Array.from("0123456789"));
+const anyLettersOrDigits = fc.stringOf(fc.oneof(anyLetter, anyDigit));
+const anyCue = concat(anyWhitespace, anyLettersOrDigits, fc.constant(': '), anyWhitespace);
+
+const anyNonCue = anyTrimmedText.filter((s) => !s.match(/^[a-zA-Z0-9]+: /));
+const anyFirstLine = concat(anyCue, anyNonCue, anyWhitespace, fc.constant('\n'));
+const anyFirstParagraph = concat(anyFirstLine, fc.stringOf(anyNonBlankLine));
+const anyNextParagraph = fc.stringOf(anyNonBlankLine, {minLength: 1});
+
+const anyMoreParagraphs = fc.stringOf(concat(anyBlankLines, anyNextParagraph));
+const anyCellText = concat(anyFirstParagraph, anyMoreParagraphs);
 
 interface Cell {
   lang: string;
@@ -224,7 +233,8 @@ const anyCell = fc.record({
 
 const anyCellAndInput: fc.Arbitrary<[Cell, string]> = fc.tuple(anyBlankLines, anyCell).map(([before, cell]) => {
   const header = `%${cell.lang}\n`;
-  return [cell, header + before + cell.text];
+  const text = cell.text.replace(/^bot: /, "");
+  return [cell, header + before + text];
 });
 
 const anyCellsAndInput: fc.Arbitrary<[Cell[], string]> = fc.array(anyCellAndInput).map((cellsAndInput) => {

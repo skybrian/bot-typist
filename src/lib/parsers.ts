@@ -59,10 +59,50 @@ export class Scanner {
     return this.buffer.includes('\n');
   }
 
+  /**
+   * Returns true if the buffer starts with the given prefix.
+   * Pulls more input if needed.
+   */
+  async startsWith(prefix: string): Promise<boolean> {
+    if (!await this.fillTo(prefix.length)) {
+      return false;
+    }
+    return this.buffer.startsWith(prefix);
+  }
+  
   /** Clears and returns the buffer. */
   take(): string {
     const result = this.buffer;
     this.buffer = '';
+    return result;
+  }
+
+  async takeCharIn(chars: string): Promise<string> {
+    if (!await this.fillTo(1) || !chars.includes(this.buffer[0])) {
+      return '';
+    }
+    const result = this.buffer[0];
+    this.buffer = this.buffer.slice(1);
+    return result;
+  }
+
+  async takeCharsIn(chars: string): Promise<string> {
+    let result = '';
+    while (true) {
+      const c = await this.takeCharIn(chars);
+      if (!c) {
+        return result;
+      }
+      result += c;
+    }
+  }
+
+  async takeStartsWith(prefix: string): Promise<string> {
+    if (!await this.startsWith(prefix)) {
+      return '';
+    }
+    const result = this.buffer.slice(0, prefix.length);
+    this.buffer = this.buffer.slice(prefix.length);
     return result;
   }
 
@@ -105,18 +145,9 @@ export class Scanner {
       }
     }
   }
-
-  /**
-   * Returns true if the buffer starts with the given prefix.
-   * Pulls more input if needed.
-   */
-  async startsWith(prefix: string): Promise<boolean> {
-    if (!await this.fillTo(prefix.length)) {
-      return false;
-    }
-    return this.buffer.startsWith(prefix);
-  }
 }
+
+const cueChars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 /**
  * Splits input into cells and sends them to the output.
@@ -128,17 +159,21 @@ export const handleBotResponse =
   (output: CellWriter): ReadFunction<void> => async (input) => {
     const scanner = new Scanner(input);
 
+    let inMarkdown = true;
+
     // Starts writing a cell.
     // Returns false if writing has been cancelled.
     const sendCellStart = async (rest: string): Promise<boolean> => {
       switch (rest.trim()) {
         case "markdown":
+          inMarkdown = true;
           return await output.startMarkdownCell();
         case "python":
+          inMarkdown = false;
           return await output.startCodeCell();
         default:
           console.log(`Unknown cell type: ${rest.trim()}`);
-          return await output.write(`%${rest}`);
+          return await output.write(`%${rest}\n`);
       }
     };
 
@@ -163,6 +198,31 @@ export const handleBotResponse =
       // skip blank lines at start of cell
       while (await scanner.takeBlankLine()) {}
 
+      if (inMarkdown) {
+        // send indentation and cue
+
+        const indent = await scanner.takeCharsIn(' \t');
+        if (indent) {
+          if (!await output.write(indent)) {
+            return State.cancelled;
+          }
+        }
+
+        const cueStart = await scanner.takeCharsIn(cueChars);
+        if (cueStart) {
+          if (await scanner.takeStartsWith(': ')) {
+            if (!await output.write(cueStart + ': ')) {
+              return State.cancelled;
+            }
+          } else {
+            // doesn't match, so add one.
+            if (!await output.write('bot: ' + cueStart)) {
+              return State.cancelled;
+            }
+          }
+        }
+      }
+      
       while (true) {
         if (await scanner.startsWith('%')) {
           return handleHeader();
