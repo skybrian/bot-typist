@@ -210,7 +210,7 @@ const anyNonBlankLine = concat(anyWhitespace, anyTrimmedText, anyWhitespace, fc.
 
 const anyLetter = fc.constantFrom(...Array.from("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"));
 const anyDigit = fc.constantFrom(...Array.from("0123456789"));
-const anyLettersOrDigits = fc.stringOf(fc.oneof(anyLetter, anyDigit));
+const anyLettersOrDigits = fc.stringOf(fc.oneof(anyLetter, anyDigit), {minLength: 1});
 const anyCue = concat(anyWhitespace, anyLettersOrDigits, fc.constant(': '), anyWhitespace);
 
 const anyNonCue = anyTrimmedText.filter((s) => !s.match(/^[a-zA-Z0-9]+: /));
@@ -295,6 +295,15 @@ describe("handleBotResponse", () => {
     const writer = new TestCellWriter();
     await handleBotResponse(writer)(reader);
     expect(writer.cells).toEqual([]);
+  });
+
+  it("adds a bot prompt if it's not there", async () => {
+    await fc.assert(fc.asyncProperty(anyNonCue, async ([text]) => {
+      const reader = new TestReader([text]);
+      const writer = new TestCellWriter();
+      await handleBotResponse(writer)(reader);
+      expect(writer.cells).toEqual([{lang: "markdown", text: `bot: ${text}`}]);
+    }));
   });
 
   it("parses chunks into cells", async function () {

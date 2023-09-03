@@ -11,6 +11,11 @@ enum State {
   done
 }
 
+enum CellType {
+  markdown = "markdown",
+  python = "python"
+}
+
 /**
  * Reads streaming input into a buffer and provides methods for parsing it.
  */
@@ -124,6 +129,19 @@ export class Scanner {
     return line;
   }
 
+  async takeHeaderLine(): Promise<CellType | ''> {
+    if (!await this.startsWith('%')) {
+      return '';
+    }
+    if (await this.takeStartsWith('%python\n')) {
+      return CellType.python;
+    }
+    if (await this.takeStartsWith('%markdown\n')) {
+      return CellType.markdown;
+    }
+    return '';
+  }
+
   /**
    * Reads and removes a line that only contains whitespace, if there is one.
    * Otherwise, pulls enough input to tell that it's not blank.
@@ -163,8 +181,8 @@ export const handleBotResponse =
 
     // Starts writing a cell.
     // Returns false if writing has been cancelled.
-    const sendCellStart = async (rest: string): Promise<boolean> => {
-      switch (rest.trim()) {
+    const sendCellStart = async (type: CellType): Promise<boolean> => {
+      switch (type) {
         case "markdown":
           inMarkdown = true;
           return await output.startMarkdownCell();
@@ -172,23 +190,19 @@ export const handleBotResponse =
           inMarkdown = false;
           return await output.startCodeCell();
         default:
-          console.log(`Unknown cell type: ${rest.trim()}`);
-          return await output.write(`%${rest}\n`);
+          throw new Error("unhandled cell type");
       }
     };
 
-    // Reads a cell header line from the input and sets the cell type.
-    // Precondition: buffer[0] is '%' at the start of a line.
-    // Postcondition if still running: buffer[0] is the start of the next line.
-    const handleHeader = async (): Promise<State> => {
-      const line = await scanner.takeLine();
-      if (!line) {
-        // The input ended with a header line.
-        // Ignore it and don't start a new cell.
-        return State.done;
+    const sendCue = async (): Promise<boolean> => {
+      const cueStart = await scanner.takeCharsIn(cueChars);
+      if (cueStart && await scanner.takeStartsWith(': ')) {
+        // cue is already present        
+        return await output.write(cueStart + ': ');
       }
-      const rest = line.slice(1, line.length - 1);
-      return await sendCellStart(rest) ?  State.running : State.cancelled;
+      // add the cue
+
+      return await output.write('bot: ' + cueStart);
     };
 
     // Sends one cell.
@@ -197,6 +211,12 @@ export const handleBotResponse =
     const handleCell = async (): Promise<State> => {
       // skip blank lines at start of cell
       while (await scanner.takeBlankLine()) {}
+
+      // check for empty cell
+      const cellType = await scanner.takeHeaderLine();
+      if (cellType) {
+        return await sendCellStart(cellType) ? State.running : State.cancelled;
+      }
 
       if (inMarkdown) {
         // send indentation and cue
@@ -208,24 +228,15 @@ export const handleBotResponse =
           }
         }
 
-        const cueStart = await scanner.takeCharsIn(cueChars);
-        if (cueStart) {
-          if (await scanner.takeStartsWith(': ')) {
-            if (!await output.write(cueStart + ': ')) {
-              return State.cancelled;
-            }
-          } else {
-            // doesn't match, so add one.
-            if (!await output.write('bot: ' + cueStart)) {
-              return State.cancelled;
-            }
-          }
+        if (!await sendCue()) {
+          return State.cancelled;
         }
       }
       
       while (true) {
-        if (await scanner.startsWith('%')) {
-          return handleHeader();
+        const cellType = await scanner.takeHeaderLine();
+        if (cellType) {
+          return await sendCellStart(cellType) ? State.running : State.cancelled;
         }
 
         // send chunks in line
