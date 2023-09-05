@@ -24,6 +24,14 @@ export interface Writer {
   write(data: string): Promise<boolean>;
 }
 
+export class StringWriter implements Writer {
+  buffer = "";
+  async write(data: string): Promise<boolean> {
+    this.buffer += data;
+    return true;
+  }
+}
+
 export interface WriteCloser<T> extends Writer {
   /** Signals that the stream is finished. Blocks until acknowledged. */
   close(): Promise<T>;

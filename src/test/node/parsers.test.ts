@@ -1,226 +1,17 @@
 import expect from "expect";
 import * as fc from "fast-check";
-import { CellWriter, handleBotResponse, Scanner } from "../../lib/parsers";
-import { DONE, Reader, ReadResult } from "../../lib/streams";
+import { anyChunksOf, concat, TestReader } from "../lib/generators";
 
-class TestReader implements Reader {
-  private chunks: string[];
-  private next = 0;
+import {
+  allCellTypes,
+  CellWriter,
+  copyCell,
+  handleBotResponse,
+  matchHeaderLine,
+} from "../../lib/parsers";
 
-  constructor(chunks: string[]) {
-    this.chunks = chunks;
-  }
-
-  read(): Promise<ReadResult> {
-    if (this.next >= this.chunks.length) {
-      return Promise.resolve(DONE);
-    }
-    return Promise.resolve(this.chunks[this.next++]);
-  }
-}
-
-const anyChunks = fc.array(fc.unicodeString({ minLength: 1 }));
-
-const anyChunksAndOffset = anyChunks.chain((chunks) => {
-  const offset = fc.integer({ min: 0, max: chunks.join("").length });
-  return fc.tuple(fc.constant(chunks), offset);
-});
-
-describe("Scanner", () => {
-  describe("pull", () => {
-    it("returns false when there's no more input", async () => {
-      const scanner = new Scanner(new TestReader([]));
-      expect(await scanner.pull()).toBe(false);
-    });
-
-    it("appends each chunks to the buffer, one at a time", async () => {
-      await fc.assert(fc.asyncProperty(anyChunks, async (chunks) => {
-        const scanner = new Scanner(new TestReader(chunks));
-        let pulls = 0;
-        while (pulls < chunks.length) {
-          expect(await scanner.pull()).toBe(true);
-          pulls++;
-          expect(scanner.buffer).toEqual(chunks.slice(0, pulls).join(""));
-        }
-        expect(await scanner.pull()).toBe(false);
-        expect(scanner.buffer).toEqual(chunks.join(""));
-      }));
-    });
-  });
-
-  describe("fillTo", () => {
-    it("returns false when there's no input", async () => {
-      const scanner = new Scanner(new TestReader([]));
-      expect(await scanner.fillTo(1)).toBe(false);
-    });
-
-    it("returns false when there's not enough input", async () => {
-      await fc.assert(
-        fc.asyncProperty(
-          fc.tuple(anyChunks, fc.integer({ min: 1, max: 1000 })),
-          async ([chunks, n]) => {
-            const scanner = new Scanner(new TestReader(chunks));
-            expect(await scanner.fillTo(chunks.join("").length + n)).toBe(
-              false,
-            );
-            expect(scanner.buffer).toEqual(chunks.join(""));
-          },
-        ),
-      );
-    });
-
-    it("adds at least the specified number of characters to the buffer", async () => {
-      await fc.assert(
-        fc.asyncProperty(anyChunksAndOffset, async ([chunks, offset]) => {
-          const scanner = new Scanner(new TestReader(chunks));
-          expect(await scanner.fillTo(offset)).toBe(true);
-          expect(scanner.buffer.length).toBeGreaterThanOrEqual(offset);
-          expect(scanner.buffer).toEqual(
-            chunks.join("").slice(0, scanner.buffer.length),
-          );
-        }),
-      );
-    });
-  });
-
-  describe("hasLine", () => {
-    it("returns false when there's no input", async () => {
-      const scanner = new Scanner(new TestReader([]));
-      expect(scanner.hasLine).toBe(false);
-    });
-
-    it("returns false until there's a newline in the buffer", async () => {
-      await fc.assert(fc.asyncProperty(anyChunks, async (chunks) => {
-        const scanner = new Scanner(new TestReader(chunks));
-        const input = chunks.join("");
-        const newline = input.indexOf("\n");
-        while (await scanner.pull()) {
-          expect(scanner.hasLine).toBe(
-            newline >= 0 && scanner.buffer.length > newline,
-          );
-        }
-      }));
-    });
-  });
-
-  describe("take", () => {
-    it("returns the entire buffer", async () => {
-      await fc.assert(fc.asyncProperty(anyChunks, async (chunks) => {
-        const scanner = new Scanner(new TestReader(chunks));
-        while (await scanner.pull()) {
-          const buf = scanner.buffer;
-          expect(scanner.take()).toEqual(buf);
-          expect(scanner.buffer).toEqual("");
-        }
-      }));
-    });
-  });
-
-  describe("takeLine", () => {
-    it("returns false when there's no input", async () => {
-      const scanner = new Scanner(new TestReader([]));
-      expect(await scanner.takeLine()).toBe(false);
-    });
-
-    it("returns each complete line from the input", async () => {
-      await fc.assert(fc.asyncProperty(anyChunks, async (chunks) => {
-        const scanner = new Scanner(new TestReader(chunks));
-        const input = chunks.join("");
-        const lines = input.split("\n");
-        for (const line of lines.slice(0, -1)) {
-          expect(await scanner.takeLine()).toEqual(line + "\n");
-        }
-        expect(await scanner.takeLine()).toBe(false);
-      }));
-    });
-  });
-
-  describe("takeBlankLine", async () => {
-    it("returns false when there's no input", async () => {
-      const scanner = new Scanner(new TestReader([]));
-      expect(await scanner.takeBlankLine()).toBe(false);
-    });
-
-    it("takes the first line if it's blank", async () => {
-      await fc.assert(fc.asyncProperty(anyChunks, async (chunks) => {
-        const scanner = new Scanner(new TestReader(chunks));
-        const input = chunks.join("");
-
-        const lines = input.split("\n");
-        if (lines.length === 1) {
-          // no newline in input
-          expect(await scanner.takeBlankLine()).toBe(false);
-          expect(scanner.buffer).toEqual(
-            input.substring(0, scanner.buffer.length),
-          );
-          return;
-        }
-
-        const result = await scanner.takeBlankLine();
-        if (lines[0].trim() === "") {
-          expect(result).toEqual(lines[0] + "\n");
-          if (lines.length > 2) {
-            expect(scanner.takeLine()).toEqual(lines[1] + "\n");
-          } else {
-            expect(await scanner.takeLine()).toEqual(lines[1]);
-          }
-        } else {
-          expect(result).toBe(false);
-          expect(scanner.buffer).toEqual(input.slice(0, scanner.buffer.length));
-        }
-      }));
-    });
-  });
-
-  describe("startsWith", () => {
-    it("returns true when the prefix is empty", async () => {
-      await fc.assert(fc.asyncProperty(anyChunks, async (chunks) => {
-        const scanner = new Scanner(new TestReader(chunks));
-        expect(await scanner.startsWith("")).toBe(true);
-      }));
-    });
-
-    it("returns false when there's no input", async () => {
-      await fc.assert(
-        fc.asyncProperty(fc.unicodeString({ minLength: 1 }), async (prefix) => {
-          const scanner = new Scanner(new TestReader([]));
-          expect(await scanner.startsWith(prefix)).toBe(false);
-        }),
-      );
-    });
-
-    it("returns true when the input starts with the prefix", async () => {
-      await fc.assert(
-        fc.asyncProperty(anyChunksAndOffset, async ([chunks, offset]) => {
-          const scanner = new Scanner(new TestReader(chunks));
-          const input = chunks.join("");
-          const prefix = input.slice(0, offset);
-          expect(await scanner.startsWith(prefix)).toBe(true);
-        }),
-      );
-    });
-
-    it("returns false when the input doesn't start with the prefix", async () => {
-      await fc.assert(
-        fc.asyncProperty(anyChunksAndOffset, async ([chunks, offset]) => {
-          if (offset === chunks.join("").length) {
-            return;
-          }
-          const scanner = new Scanner(new TestReader(chunks));
-          const input = chunks.join("");
-          const prefix = input.slice(0, offset);
-          const next = input.slice(offset, offset + 1);
-          const other = next === "x" ? "y" : "x";
-          expect(await scanner.startsWith(prefix + other)).toBe(false);
-        }),
-      );
-    });
-  });
-});
-
-function concat(...args: fc.Arbitrary<string>[]): fc.Arbitrary<string> {
-  return fc.tuple(...args).map((strings) => strings.join(""));
-}
+import { Scanner } from "../../lib/scanner";
+import { StringWriter } from "../../lib/streams";
 
 const anyWhitespace = fc.stringOf(fc.constantFrom(" ", "\t"));
 const anyBlankLine = concat(anyWhitespace, fc.constant("\n"));
@@ -289,10 +80,10 @@ const anyCellsAndInput: fc.Arbitrary<[Cell[], string]> = fc.array(
   return [cells, input];
 });
 
-const anyCellsAndChunks = fc.tuple(anyCellsAndInput, fc.boolean()).chain(
-  ([[cells, input], splitChoice]) => {
-    const chunks = splitChoice ? input.split("") : [input];
-    return fc.tuple(fc.constant(cells), fc.constant(chunks));
+const anyCellsAndChunks = anyCellsAndInput.chain<[Cell[], string[]]>(
+  ([cells, input]) => {
+    const chunked = anyChunksOf(fc.constant(input));
+    return chunked.map(({ chunks }) => [cells, chunks]);
   },
 );
 
@@ -336,6 +127,91 @@ class TestCellWriter implements CellWriter {
   }
 }
 
+describe("allCellTypes", () => {
+  it("has all the cell types", () => {
+    expect(allCellTypes).toEqual(["markdown", "python"]);
+  });
+});
+
+describe("matchHeaderLine", () => {
+  it("returns null if there's no input", async () => {
+    const scanner = new Scanner(new TestReader([]));
+    expect(await matchHeaderLine(scanner)).toBe(null);
+  });
+
+  it("returns null if there's no match", async () => {
+    const input = fc.unicodeString().filter((s) =>
+      !s.startsWith("%python\n") && !s.startsWith("%markdown\n")
+    );
+
+    await fc.assert(
+      fc.asyncProperty(anyChunksOf(input), async ({ chunks }) => {
+        const scanner = new Scanner(new TestReader(chunks));
+        expect(await matchHeaderLine(scanner)).toBe(null);
+      }),
+    );
+  });
+
+  for (const type of allCellTypes) {
+    it(`matches header: %${type}`, async () => {
+      const chunked = anyChunksOf(fc.constant(`%${type}\n`));
+      const expected = { type, line: `%${type}\n` };
+
+      await fc.assert(fc.asyncProperty(chunked, async ({ chunks }) => {
+        const scanner = new Scanner(new TestReader(chunks));
+        expect(await matchHeaderLine(scanner)).toStrictEqual(expected);
+      }));
+    });
+  }
+});
+
+describe("copyCell", () => {
+  it("copies nothing if there's no input", async () => {
+    const reader = new TestReader([]);
+    const writer = new StringWriter();
+    expect(await copyCell(new Scanner(reader), writer)).toBe(true);
+    expect(writer.buffer).toBe("");
+  });
+
+  const allHeaders = new Set(allCellTypes.map((t) => `%${t}`));
+  const nonNewline = fc.unicode().filter((s) => s !== "\n");
+  const nonHeaderLine = fc.stringOf(nonNewline).filter((s) =>
+    !allHeaders.has(s)
+  );
+  const nonHeaderText = fc.stringOf(fc.oneof(nonHeaderLine, fc.constant("\n")));
+
+  it("copies arbitrary text when there's no cell header", async () => {
+    const chunked = anyChunksOf(nonHeaderText);
+
+    await fc.assert(fc.asyncProperty(chunked, async ({ original, chunks }) => {
+      const reader = new TestReader(chunks);
+      const writer = new StringWriter();
+      expect(await copyCell(new Scanner(reader), writer)).toBe(true);
+      expect(writer.buffer).toBe(original);
+    }));
+  });
+
+  for (const header of allHeaders) {
+    it(`stops copying at ${header}`, async () => {
+      const args = nonHeaderText.chain((original) => {
+        if (!original.endsWith("\n")) {
+          original += "\n";
+        }
+        const input = original + header + "\nXXX";
+        const chunked = anyChunksOf(fc.constant(input));
+        return chunked.map(({ chunks }) => ({ original, chunks }));
+      });
+
+      await fc.assert(fc.asyncProperty(args, async ({ original, chunks }) => {
+        const reader = new TestReader(chunks);
+        const writer = new StringWriter();
+        expect(await copyCell(new Scanner(reader), writer)).toBe(true);
+        expect(writer.buffer).toBe(original);
+      }));
+    });
+  }
+});
+
 describe("handleBotResponse", () => {
   it("does nothing when there's no input", async () => {
     const reader = new TestReader([]);
@@ -363,6 +239,24 @@ describe("handleBotResponse", () => {
       await handleBotResponse(writer)(reader);
       expect(writer.cells).toEqual([{ lang: "markdown", text: text }]);
     }));
+  });
+
+  it("handles a Python cell by itself", async () => {
+    const anyPythonText = fc.unicodeString({ minLength: 1 }).filter((s) =>
+      !s.includes("%python\n") && s.trim() !== ""
+    );
+    const textAndChunks = anyPythonText.chain((text) =>
+      fc.tuple(fc.constant(text), anyChunksOf(fc.constant(`%python\n${text}`)))
+    );
+
+    await fc.assert(
+      fc.asyncProperty(textAndChunks, async ([original, chunked]) => {
+        const reader = new TestReader(chunked.chunks);
+        const writer = new TestCellWriter();
+        await handleBotResponse(writer)(reader);
+        expect(writer.cells).toEqual([{ lang: "python", text: original }]);
+      }),
+    );
   });
 
   it("parses chunks into cells", async function () {
