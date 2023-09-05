@@ -6,6 +6,7 @@ import {
   allCellTypes,
   CellWriter,
   copyCell,
+  copyOrAddCue,
   handleBotResponse,
   matchHeaderLine,
 } from "../../lib/parsers";
@@ -13,79 +14,10 @@ import {
 import { Scanner } from "../../lib/scanner";
 import { StringWriter } from "../../lib/streams";
 
-const anyWhitespace = fc.stringOf(fc.constantFrom(" ", "\t"));
-const anyBlankLine = concat(anyWhitespace, fc.constant("\n"));
-const anyBlankLines = fc.stringOf(anyBlankLine, { minLength: 1 });
-
-const anyTrimmedText = fc.unicodeString({ minLength: 1 }).map((s) => s.trim())
-  .filter((s) => s.length > 0);
-const anyNonBlankLine = concat(
-  anyWhitespace,
-  anyTrimmedText,
-  anyWhitespace,
-  fc.constant("\n"),
-);
-
-const anyLetter = fc.constantFrom(
-  ...Array.from("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"),
-);
-const anyDigit = fc.constantFrom(...Array.from("0123456789"));
-const anyLettersOrDigits = fc.stringOf(fc.oneof(anyLetter, anyDigit), {
-  minLength: 1,
-});
-const anyCue = concat(
-  anyWhitespace,
-  anyLettersOrDigits,
-  fc.constant(": "),
-  anyWhitespace,
-);
-
-const anyNonCue = anyTrimmedText.filter((s) => !s.match(/^[a-zA-Z0-9]+: /));
-const anyFirstLine = concat(
-  anyCue,
-  anyNonCue,
-  anyWhitespace,
-  fc.constant("\n"),
-);
-const anyFirstParagraph = concat(anyFirstLine, fc.stringOf(anyNonBlankLine));
-const anyNextParagraph = fc.stringOf(anyNonBlankLine, { minLength: 1 });
-
-const anyMoreParagraphs = fc.stringOf(concat(anyBlankLines, anyNextParagraph));
-const anyCellText = concat(anyFirstParagraph, anyMoreParagraphs);
-
 interface Cell {
   lang: string;
   text: string;
 }
-
-const anyCell = fc.record({
-  lang: fc.constantFrom("python", "markdown"),
-  text: anyCellText,
-});
-
-const anyCellAndInput: fc.Arbitrary<[Cell, string]> = fc.tuple(
-  anyBlankLines,
-  anyCell,
-).map(([before, cell]) => {
-  const header = `%${cell.lang}\n`;
-  const text = cell.text.replace(/^bot: /, "");
-  return [cell, header + before + text];
-});
-
-const anyCellsAndInput: fc.Arbitrary<[Cell[], string]> = fc.array(
-  anyCellAndInput,
-).map((cellsAndInput) => {
-  const cells = cellsAndInput.map(([cell, _]) => cell);
-  const input = cellsAndInput.map(([_, input]) => input).join("");
-  return [cells, input];
-});
-
-const anyCellsAndChunks = anyCellsAndInput.chain<[Cell[], string[]]>(
-  ([cells, input]) => {
-    const chunked = anyChunksOf(fc.constant(input));
-    return chunked.map(({ chunks }) => [cells, chunks]);
-  },
-);
 
 class TestCellWriter implements CellWriter {
   cells: Cell[] = [];
@@ -167,9 +99,9 @@ describe("matchHeaderLine", () => {
 
 describe("copyCell", () => {
   it("copies nothing if there's no input", async () => {
-    const reader = new TestReader([]);
+    const scanner = new Scanner(new TestReader([]));
     const writer = new StringWriter();
-    expect(await copyCell(new Scanner(reader), writer)).toBe(true);
+    expect(await copyCell(scanner, writer)).toBe(true);
     expect(writer.buffer).toBe("");
   });
 
@@ -184,9 +116,9 @@ describe("copyCell", () => {
     const chunked = anyChunksOf(nonHeaderText);
 
     await fc.assert(fc.asyncProperty(chunked, async ({ original, chunks }) => {
-      const reader = new TestReader(chunks);
+      const reader = new Scanner(new TestReader(chunks));
       const writer = new StringWriter();
-      expect(await copyCell(new Scanner(reader), writer)).toBe(true);
+      expect(await copyCell(reader, writer)).toBe(true);
       expect(writer.buffer).toBe(original);
     }));
   });
@@ -203,22 +135,83 @@ describe("copyCell", () => {
       });
 
       await fc.assert(fc.asyncProperty(args, async ({ original, chunks }) => {
-        const reader = new TestReader(chunks);
+        const scanner = new Scanner(new TestReader(chunks));
         const writer = new StringWriter();
-        expect(await copyCell(new Scanner(reader), writer)).toBe(true);
+        expect(await copyCell(scanner, writer)).toBe(true);
         expect(writer.buffer).toBe(original);
       }));
     });
   }
 });
 
+const anyLetter = fc.constantFrom(
+  ...Array.from("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"),
+);
+const anyDigit = fc.constantFrom(...Array.from("0123456789"));
+const anyLettersOrDigits = fc.stringOf(fc.oneof(anyLetter, anyDigit), {
+  minLength: 1,
+});
+const anyCue = anyLettersOrDigits.map((s) => s + ": ");
+
+const anyWhitespace = fc.stringOf(fc.constantFrom(" ", "\t"));
+
+describe("copyOrAddCue", () => {
+  it("writes the default cue when there's no input", async () => {
+    const scanner = new Scanner(new TestReader([]));
+    const writer = new StringWriter();
+    expect(await copyOrAddCue(scanner, writer)).toBe(true);
+    expect(writer.buffer).toBe("bot: ");
+  });
+
+  it("removes any leading whitespace from the input", async () => {
+    const chunked = anyChunksOf(anyWhitespace);
+
+    await fc.assert(fc.asyncProperty(chunked, async ({ chunks }) => {
+      const scanner = new Scanner(new TestReader(chunks));
+      const writer = new StringWriter();
+      expect(await copyOrAddCue(scanner, writer)).toBe(true);
+      expect(writer.buffer).toBe("bot: ");
+      expect(scanner.atEnd).toBe(true);
+    }));
+  });
+
+  it("doesn't add a cue if there's already one", async () => {
+    const input = concat(anyCue, fc.unicodeString());
+    const chunked = anyChunksOf(input);
+    await fc.assert(fc.asyncProperty(chunked, async ({ original, chunks }) => {
+      const scanner = new Scanner(new TestReader(chunks));
+      const writer = new StringWriter();
+      expect(await copyOrAddCue(scanner, writer)).toBe(true);
+      const originalCue = original.slice(0, original.indexOf(": ") + 2);
+      expect(writer.buffer).toEqual(originalCue);
+    }));
+  });
+
+  it("adds the default cue if there's no cue", async () => {
+    const input = fc.unicodeString().filter((s) => !s.match(/^[a-zA-Z0-9]+: /));
+    const chunked = anyChunksOf(input);
+    await fc.assert(fc.asyncProperty(chunked, async ({ original, chunks }) => {
+      const scanner = new Scanner(new TestReader(chunks));
+      const writer = new StringWriter();
+      expect(await copyOrAddCue(scanner, writer)).toBe(true);
+      expect(writer.buffer.length).toBeGreaterThan(4);
+      const expected = ("bot: " + original).slice(0, writer.buffer.length);
+      expect(writer.buffer).toBe(expected);
+    }));
+  });
+});
+
 describe("handleBotResponse", () => {
-  it("does nothing when there's no input", async () => {
+  it("writes a message when there's no response", async () => {
     const reader = new TestReader([]);
     const writer = new TestCellWriter();
     await handleBotResponse(writer)(reader);
-    expect(writer.cells).toEqual([]);
+    expect(writer.cells).toEqual([{"lang": "markdown", "text": "bot: (no response)"}]);
   });
+
+  const anyTrimmedText = fc.unicodeString({ minLength: 1 }).map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  const anyNonCue = anyTrimmedText.filter((s) => !s.match(/^[a-zA-Z0-9]+: /));
 
   it("adds a bot prompt if it's not there", async () => {
     await fc.assert(fc.asyncProperty(anyNonCue, async ([text]) => {
@@ -232,12 +225,21 @@ describe("handleBotResponse", () => {
     }));
   });
 
+  const anyFirstLine = concat(
+    anyCue,
+    anyWhitespace,
+    anyNonCue,
+    anyWhitespace,
+    fc.constant("\n"),
+  );
+
   it("doesn't add a bot prompt if a prompt is already there", async () => {
     await fc.assert(fc.asyncProperty(anyFirstLine, async (text) => {
       const reader = new TestReader([text]);
       const writer = new TestCellWriter();
       await handleBotResponse(writer)(reader);
-      expect(writer.cells).toEqual([{ lang: "markdown", text: text }]);
+      const expected = text.trimStart();
+      expect(writer.cells).toEqual([{ lang: "markdown", text: expected }]);
     }));
   });
 
@@ -258,6 +260,54 @@ describe("handleBotResponse", () => {
       }),
     );
   });
+
+  const anyBlankLines = fc.stringOf(anyWhitespace.map((s) => s + "\n"), {
+    minLength: 1,
+  });
+
+  const anyNonBlankLine = concat(
+    anyWhitespace,
+    anyTrimmedText,
+    anyWhitespace,
+    fc.constant("\n"),
+  );
+
+  const anyFirstParagraph = concat(anyFirstLine, fc.stringOf(anyNonBlankLine));
+  const anyNextParagraph = fc.stringOf(anyNonBlankLine, { minLength: 1 });
+
+  const anyMoreParagraphs = fc.stringOf(
+    concat(anyBlankLines, anyNextParagraph),
+  );
+  const anyCellText = concat(anyFirstParagraph, anyMoreParagraphs);
+
+  const anyCell = fc.record({
+    lang: fc.constantFrom("python", "markdown"),
+    text: anyCellText,
+  });
+
+  const anyCellAndInput: fc.Arbitrary<[Cell, string]> = fc.tuple(
+    anyBlankLines,
+    anyCell,
+  ).map(([before, cell]) => {
+    const header = `%${cell.lang}\n`;
+    const text = cell.text.replace(/^bot: /, "");
+    return [cell, header + before + text];
+  });
+
+  const anyCellsAndInput: fc.Arbitrary<[Cell[], string]> = fc.array(
+    anyCellAndInput, { minLength: 1 },
+  ).map((cellsAndInput) => {
+    const cells = cellsAndInput.map(([cell, _]) => cell);
+    const input = cellsAndInput.map(([_, input]) => input).join("");
+    return [cells, input];
+  });
+
+  const anyCellsAndChunks = anyCellsAndInput.chain<[Cell[], string[]]>(
+    ([cells, input]) => {
+      const chunked = anyChunksOf(fc.constant(input));
+      return chunked.map(({ chunks }) => [cells, chunks]);
+    },
+  );
 
   it("parses chunks into cells", async function () {
     this.timeout(10000);
