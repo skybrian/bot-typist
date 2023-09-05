@@ -1,12 +1,9 @@
 import { ReadFunction, WriteCloser, Writer } from "./streams";
 import { Scanner } from "./scanner";
 
-export enum CellType {
-  markdown = "markdown",
-  python = "python",
-}
+export const allCellTypes = ["markdown", "python"] as const;
 
-export const allCellTypes: CellType[] = Object.values(CellType) as CellType[];
+type CellType = typeof allCellTypes[number];
 
 export interface HeaderLine {
   type: CellType;
@@ -17,9 +14,9 @@ export const matchHeaderLine = async (
   scanner: Scanner,
 ): Promise<HeaderLine | null> => {
   if (await scanner.startsWith("%python\n")) {
-    return { type: CellType.python, line: "%python\n" };
+    return { type: "python", line: "%python\n" };
   } else if (await scanner.startsWith("%markdown\n")) {
-    return { type: CellType.markdown, line: "%markdown\n" };
+    return { type: "markdown", line: "%markdown\n" };
   } else {
     return null;
   }

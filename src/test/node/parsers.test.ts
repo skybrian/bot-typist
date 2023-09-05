@@ -59,12 +59,6 @@ class TestCellWriter implements CellWriter {
   }
 }
 
-describe("allCellTypes", () => {
-  it("has all the cell types", () => {
-    expect(allCellTypes).toEqual(["markdown", "python"]);
-  });
-});
-
 describe("matchHeaderLine", () => {
   it("returns null if there's no input", async () => {
     const scanner = new Scanner(new TestReader([]));
