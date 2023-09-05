@@ -18,15 +18,6 @@ export interface CellWriter extends WriteCloser<boolean> {
 const cueChars =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
-export const handleBotResponse =
-  (output: CellWriter): ReadFunction<void> => async (input) => {
-    if (!await new BotResponse(input).copyCells(output)) {
-      console.log("bot response cancelled");
-      return;
-    }
-    await output.close();
-  };
-
 export class BotResponse {
   #stream: Scanner;
 
@@ -45,7 +36,7 @@ export class BotResponse {
    *
    * @returns false if the writer cancelled the copy.
    */
-  async copyCells(output: CellWriter): Promise<boolean> {
+  async copy(output: CellWriter): Promise<boolean> {
     // skip blank lines at start of response before checking for end
     await this.skipBlankLines();
 

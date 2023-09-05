@@ -2,12 +2,7 @@ import expect from "expect";
 import * as fc from "fast-check";
 import { anyChunksOf, concat, TestReader } from "../lib/generators";
 
-import {
-  allCellTypes,
-  BotResponse,
-  CellWriter,
-  handleBotResponse,
-} from "../../lib/parsers";
+import { allCellTypes, BotResponse, CellWriter } from "../../lib/botresponse";
 
 import { StringWriter } from "../../lib/streams";
 
@@ -202,129 +197,134 @@ describe("BotResponse", () => {
       );
     });
   });
-});
 
-describe("handleBotResponse", () => {
-  it("writes a message when there's no response", async () => {
-    const reader = new TestReader([]);
-    const writer = new TestCellWriter();
-    await handleBotResponse(writer)(reader);
-    expect(writer.cells).toEqual([{
-      "lang": "markdown",
-      "text": "bot: (no response)",
-    }]);
-  });
-
-  const anyNonCue = fc.unicodeString({ minLength: 1 }).map((s) => s.trim())
-    .filter((s) => s.length > 0).filter((s) => !s.match(/^[a-zA-Z0-9]+: /));
-
-  it("adds a bot prompt if it's not there", async () => {
-    await fc.assert(fc.asyncProperty(anyNonCue, async ([text]) => {
-      const reader = new TestReader([text]);
+  describe("copy", () => {
+    it("writes a message when there's no response", async () => {
+      const reader = new TestReader([]);
       const writer = new TestCellWriter();
-      await handleBotResponse(writer)(reader);
+      expect(await new BotResponse(reader).copy(writer)).toBe(true);
       expect(writer.cells).toEqual([{
-        lang: "markdown",
-        text: `bot: ${text}`,
+        "lang": "markdown",
+        "text": "bot: (no response)",
       }]);
-    }));
-  });
+    });
 
-  const anyCue = fc.constantFrom("a: ", "bot: ", "gpt4: ", "42: ");
+    const anyNonCue = fc.unicodeString({ minLength: 1 }).map((s) => s.trim())
+      .filter((s) => s.length > 0).filter((s) => !s.match(/^[a-zA-Z0-9]+: /));
 
-  it("doesn't add a bot prompt if a prompt is already there", async () => {
-    const input = concat(
-      anyWhitespace,
-      anyCue,
-      anyWhitespace,
-      anyNonCue,
-    );
-
-    await fc.assert(fc.asyncProperty(input, async (text) => {
-      const reader = new TestReader([text]);
-      const writer = new TestCellWriter();
-      await handleBotResponse(writer)(reader);
-      const expected = text.trimStart();
-      expect(writer.cells).toEqual([{ lang: "markdown", text: expected }]);
-    }));
-  });
-
-  const anyCellText = fc.unicodeString({ minLength: 1 }).map((s) => s.trim() + '\n').filter((s) =>
-    s.length > 1 &&
-    !s.startsWith("%python\n") &&
-    !s.startsWith("%markdown\n") &&
-    !s.includes("\n%python\n") &&
-    !s.includes("\n%markdown\n")
-  );
-
-  it("handles a Python cell by itself", async () => {
-    const textAndChunks = anyCellText.chain((text) =>
-      fc.tuple(fc.constant(text), anyChunksOf(fc.constant(`%python\n${text}`)))
-    );
-
-    await fc.assert(
-      fc.asyncProperty(textAndChunks, async ([original, chunked]) => {
-        const reader = new TestReader(chunked.chunks);
+    it("adds a bot prompt if it's not there", async () => {
+      await fc.assert(fc.asyncProperty(anyNonCue, async ([text]) => {
+        const reader = new TestReader([text]);
         const writer = new TestCellWriter();
-        await handleBotResponse(writer)(reader);
-        expect(writer.cells).toEqual([{ lang: "python", text: original }]);
-      }),
-    );
-  });
+        expect(await new BotResponse(reader).copy(writer)).toBe(true);
+        expect(writer.cells).toEqual([{
+          lang: "markdown",
+          text: `bot: ${text}`,
+        }]);
+      }));
+    });
 
-  const anyPythonCell = fc.record({
-    lang: fc.constant("python"),
-    text: anyCellText,
-  });
+    const anyCue = fc.constantFrom("a: ", "bot: ", "gpt4: ", "42: ");
 
-  const anyMarkdownCell = fc.record({
-    lang: fc.constant("markdown"),
-    text: concat(
-      anyCue,
-      anyCellText.filter((s) => !s.match(/^[a-zA-Z0-9]+: /)),
-    ),
-  });
+    it("doesn't add a bot prompt if a prompt is already there", async () => {
+      const input = concat(
+        anyWhitespace,
+        anyCue,
+        anyWhitespace,
+        anyNonCue,
+      );
 
-  const anyCell = fc.oneof(anyPythonCell, anyMarkdownCell);
-
-  const anyBlankLines = fc.stringOf(anyWhitespace.map((s) => s + "\n"), {
-    minLength: 1,
-  });
-
-  const anyCellAndInput: fc.Arbitrary<[Cell, string]> = fc.tuple(
-    anyBlankLines,
-    anyCell,
-  ).map(([before, cell]) => {
-    const header = `%${cell.lang}\n`;
-    const text = cell.text.replace(/^bot: /, "");
-    return [cell, header + before + text];
-  });
-
-  const anyCellsAndInput: fc.Arbitrary<[Cell[], string]> = fc.array(
-    anyCellAndInput,
-    { minLength: 1 },
-  ).map((cellsAndInput) => {
-    const cells = cellsAndInput.map(([cell, _]) => cell);
-    const input = cellsAndInput.map(([_, input]) => input).join("");
-    return [cells, input];
-  });
-
-  const anyCellsAndChunks = anyCellsAndInput.chain<[Cell[], string[]]>(
-    ([cells, input]) => {
-      const chunked = anyChunksOf(fc.constant(input));
-      return chunked.map(({ chunks }) => [cells, chunks]);
-    },
-  );
-
-  it("parses chunks into cells", async function () {
-    this.timeout(10000);
-    await fc.assert(
-      fc.asyncProperty(anyCellsAndChunks, async ([cells, chunks]) => {
-        const reader = new TestReader(chunks);
+      await fc.assert(fc.asyncProperty(input, async (text) => {
+        const reader = new TestReader([text]);
         const writer = new TestCellWriter();
-        await handleBotResponse(writer)(reader);
-        expect(writer.cells).toEqual(cells);
-      }),
+        expect(await new BotResponse(reader).copy(writer)).toBe(true);
+        const expected = text.trimStart();
+        expect(writer.cells).toEqual([{ lang: "markdown", text: expected }]);
+      }));
+    });
+
+    const anyCellText = fc.unicodeString({ minLength: 1 }).map((s) =>
+      s.trim() + "\n"
+    ).filter((s) =>
+      s.length > 1 &&
+      !s.startsWith("%python\n") &&
+      !s.startsWith("%markdown\n") &&
+      !s.includes("\n%python\n") &&
+      !s.includes("\n%markdown\n")
     );
+
+    it("handles a Python cell by itself", async () => {
+      const textAndChunks = anyCellText.chain((text) =>
+        fc.tuple(
+          fc.constant(text),
+          anyChunksOf(fc.constant(`%python\n${text}`)),
+        )
+      );
+
+      await fc.assert(
+        fc.asyncProperty(textAndChunks, async ([original, chunked]) => {
+          const reader = new TestReader(chunked.chunks);
+          const writer = new TestCellWriter();
+          expect(await new BotResponse(reader).copy(writer)).toBe(true);
+          expect(writer.cells).toEqual([{ lang: "python", text: original }]);
+        }),
+      );
+    });
+
+    const anyPythonCell = fc.record({
+      lang: fc.constant("python"),
+      text: anyCellText,
+    });
+
+    const anyMarkdownCell = fc.record({
+      lang: fc.constant("markdown"),
+      text: concat(
+        anyCue,
+        anyCellText.filter((s) => !s.match(/^[a-zA-Z0-9]+: /)),
+      ),
+    });
+
+    const anyCell = fc.oneof(anyPythonCell, anyMarkdownCell);
+
+    const anyBlankLines = fc.stringOf(anyWhitespace.map((s) => s + "\n"), {
+      minLength: 1,
+    });
+
+    const anyCellAndInput: fc.Arbitrary<[Cell, string]> = fc.tuple(
+      anyBlankLines,
+      anyCell,
+    ).map(([before, cell]) => {
+      const header = `%${cell.lang}\n`;
+      const text = cell.text.replace(/^bot: /, "");
+      return [cell, header + before + text];
+    });
+
+    const anyCellsAndInput: fc.Arbitrary<[Cell[], string]> = fc.array(
+      anyCellAndInput,
+      { minLength: 1 },
+    ).map((cellsAndInput) => {
+      const cells = cellsAndInput.map(([cell, _]) => cell);
+      const input = cellsAndInput.map(([_, input]) => input).join("");
+      return [cells, input];
+    });
+
+    const anyCellsAndChunks = anyCellsAndInput.chain<[Cell[], string[]]>(
+      ([cells, input]) => {
+        const chunked = anyChunksOf(fc.constant(input));
+        return chunked.map(({ chunks }) => [cells, chunks]);
+      },
+    );
+
+    it("parses chunks into cells", async function () {
+      this.timeout(10000);
+      await fc.assert(
+        fc.asyncProperty(anyCellsAndChunks, async ([cells, chunks]) => {
+          const reader = new TestReader(chunks);
+          const writer = new TestCellWriter();
+          expect(await new BotResponse(reader).copy(writer)).toBe(true);
+          expect(writer.cells).toEqual(cells);
+        }),
+      );
+    });
   });
 });

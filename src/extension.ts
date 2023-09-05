@@ -1,9 +1,9 @@
 import * as vscode from "vscode";
 
 import { NotebookWriter, getActiveCell, editActiveCell } from "./lib/editors";
-import { handleBotResponse } from "./lib/parsers";
+import { BotResponse } from "./lib/botresponse";
 import { ChildPipe } from "./lib/processes";
-import { readAll } from "./lib/streams";
+import { Reader, readAll } from "./lib/streams";
 
 function getCommandPath() {
   return vscode.workspace.getConfiguration("bot-typist").get<string>(
@@ -225,11 +225,19 @@ async function insertReply(): Promise<boolean> {
     );
     return false;
   }
-  
+
   try {
     const writer = new NotebookWriter(cell);
     
-    const stdin = new ChildPipe(llmPath, ["--system", systemPrompt], handleBotResponse(writer));
+    const copyResponse = async (input: Reader) => {
+      if (!await new BotResponse(input).copy(writer)) {
+        console.log("bot response cancelled");
+        return;
+      }
+      await writer.close();
+    };
+  
+    const stdin = new ChildPipe(llmPath, ["--system", systemPrompt], copyResponse);
     await stdin.write(prompt);
     await stdin.close();
     return true;
