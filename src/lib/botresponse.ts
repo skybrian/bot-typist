@@ -1,4 +1,4 @@
-import { Reader, ReadFunction, WriteCloser, Writer } from "./streams";
+import { Reader, WriteCloser, Writer } from "./streams";
 import { Scanner } from "./scanner";
 
 export const allCellTypes = ["markdown", "python"] as const;
@@ -40,47 +40,58 @@ export class BotResponse {
     // skip blank lines at start of response before checking for end
     await this.skipBlankLines();
 
-    let inMarkdown = true;
-    let cellCount = 0;
-    while (!this.atEnd) {
-      await this.skipBlankLines();
-
-      if (!await this.matchHeaderLine()) {
-        // non-empty cell
-        cellCount += 1;
-
-        if (inMarkdown) {
-          if (!await this.copyOrAddCue(output)) {
-            return false;
-          }
-        }
-
-        if (!await this.copyCell(output)) {
-          return false;
-        }
-      } else {
-        // empty cell. First one (implicitly markdown) doesn't count.
-        if (cellCount > 0) {
-          cellCount += 1;
-        }
-      }
-
-      const header = await this.matchHeaderLine();
-      if (header) {
-        inMarkdown = header.type === "markdown";
-        if (!this.copyHeader(output)) {
-          return false;
-        }
-      }
-    }
-
-    if (cellCount === 0) {
+    if (this.atEnd) {
       if (!await output.write("bot: (no response)")) {
         return false;
       }
+      return true;
     }
 
-    return true;
+    let header = await this.matchHeaderLine();
+    if (!header) {
+      // no header; assume markdown
+      // TODO: send cell start?
+      if (!await this.copyMarkdown(output)) {
+        return false;
+      }
+
+      if (this.atEnd) {
+        return true;
+      }
+
+      header = await this.matchHeaderLine();
+      if (!header) {
+        // copyMarkdown shouldn't have stopped here
+        throw new Error("expected a header line");
+      }
+    }
+
+    while (true) {
+      this.#stream.skipToken(header.line);
+
+      if (header.type === "markdown") {
+        await output.startMarkdownCell();
+        await this.skipBlankLines();
+        if (!await this.copyMarkdown(output)) {
+          return false;
+        }
+      } else if (header.type === "python") {
+        await output.startCodeCell();
+        await this.skipBlankLines();
+        if (!await this.copyPython(output)) {
+          return false;
+        }
+      }
+
+      if (this.atEnd) {
+        return true;
+      }
+
+      header = await this.matchHeaderLine();
+      if (!header) {
+        throw new Error("expected a header line");
+      }
+    }
   }
 
   get atEnd(): boolean {
@@ -101,22 +112,6 @@ export class BotResponse {
     }
   }
 
-  async copyHeader(output: CellWriter): Promise<boolean> {
-    const header = await this.matchHeaderLine();
-    if (!header) {
-      throw new Error("expected a header line");
-    }
-    this.#stream.skipToken(header.line);
-    switch (header.type) {
-      case "markdown":
-        return await output.startMarkdownCell();
-      case "python":
-        return await output.startCodeCell();
-      default:
-        throw new Error("unhandled cell type");
-    }
-  }
-
   async copyOrAddCue(output: Writer, defaultName = "bot"): Promise<boolean> {
     await this.#stream.takeMatchingPrefix(" \t");
     const name = await this.#stream.takeMatchingPrefix(cueChars);
@@ -129,7 +124,53 @@ export class BotResponse {
     }
   }
 
-  async copyCell(output: Writer): Promise<boolean> {
+  async copyMarkdown(output: CellWriter): Promise<boolean> {
+    if (await this.#stream.skipToken("```python\n")) {
+      if (!await this.copyCodeBlock(output)) {
+        return false;
+      }
+    } else {
+      if (!await this.copyOrAddCue(output)) {
+        return false;
+      }
+    }
+
+    while (!this.#stream.atEnd && !await this.matchHeaderLine()) {
+      if (await this.#stream.skipToken("```python\n")) {
+        if (!await this.copyCodeBlock(output)) {
+          return false;
+        }
+      } else if (!await this.#stream.copyLineTo(output)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  async copyCodeBlock(output: CellWriter): Promise<boolean> {
+    output.startCodeCell();
+
+    while (!await this.#stream.skipToken("```\n")) {
+      if (this.atEnd) {
+        return true;
+      }
+
+      if (!await this.#stream.copyLineTo(output)) {
+        return false;
+      }
+    }
+
+    await this.skipBlankLines();
+    if (
+      !this.atEnd && !await this.matchHeaderLine() &&
+      !await this.#stream.startsWith("```python\n")
+    ) {
+      output.startMarkdownCell();
+    }
+    return true;
+  }
+
+  async copyPython(output: Writer): Promise<boolean> {
     while (!this.#stream.atEnd) {
       if (await this.matchHeaderLine()) {
         return true;
