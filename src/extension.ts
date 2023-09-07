@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
 
-import { NotebookWriter, getActiveCell, editActiveCell } from "./lib/editors";
+import { editActiveCell, getActiveCell, NotebookWriter } from "./lib/editors";
 import { BotResponse } from "./lib/botresponse";
 import { ChildPipe } from "./lib/processes";
-import { Reader, readAll } from "./lib/streams";
+import { readAll, Reader } from "./lib/streams";
+import { chooseBotPrompt } from "./lib/botrequest";
 
 function getCommandPath() {
   return vscode.workspace.getConfiguration("bot-typist").get<string>(
@@ -36,7 +37,9 @@ async function checkCommandPath(
   }
 
   const TIMEOUT = Symbol("timeout");
-  const timeout = new Promise((_, reject) => setTimeout(() => reject(TIMEOUT), 2000));
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(TIMEOUT), 2000)
+  );
 
   try {
     const first = await Promise.race([child.close(), timeout]);
@@ -88,14 +91,14 @@ function choosePromptStart(
 function choosePrompt(): string | undefined {
   const cell = getActiveCell();
   if (cell) {
-    // Include the text of each cell up to the current one.
-    let prompt = "";
-    for (let i = 0; i <= cell.index; i++) {
-      const doc = cell.notebook.cellAt(i).document;
-      prompt += `%${doc.languageId}\n${doc.getText()}\n`;
-    }
-
-    return prompt;
+    const cellAt = (index: number) => {
+      const doc = cell.notebook.cellAt(index).document;
+      return {
+        languageId: doc.languageId,
+        text: doc.getText(),
+      };
+    };
+    return chooseBotPrompt(cellAt, cell.index);
   }
 
   const ed = vscode.window.activeTextEditor;
@@ -110,7 +113,10 @@ function choosePrompt(): string | undefined {
   return prompt;
 }
 
-function decorateWhileEmpty(editor: vscode.TextEditor, placeholderText: string) {
+function decorateWhileEmpty(
+  editor: vscode.TextEditor,
+  placeholderText: string,
+) {
   const disposables = [] as vscode.Disposable[];
 
   const cleanup = () => {
@@ -123,12 +129,12 @@ function decorateWhileEmpty(editor: vscode.TextEditor, placeholderText: string) 
     isWholeLine: true,
     after: {
       contentText: placeholderText,
-      color: 'rgba(180,180,220,0.5)',
-      fontStyle: 'italic',
+      color: "rgba(180,180,220,0.5)",
+      fontStyle: "italic",
     },
   });
   disposables.push(placeholder);
-  
+
   let decorated = false;
   const renderDecoration = (doc: vscode.TextDocument) => {
     if (doc !== editor.document) {
@@ -160,12 +166,14 @@ function decorateWhileEmpty(editor: vscode.TextEditor, placeholderText: string) 
 }
 
 async function createUntitledNotebook(): Promise<boolean> {
-
-  const cell = new vscode.NotebookCellData(vscode.NotebookCellKind.Markup, '', 'markdown');
-  cell.metadata = {
-  };
+  const cell = new vscode.NotebookCellData(
+    vscode.NotebookCellKind.Markup,
+    "",
+    "markdown",
+  );
+  cell.metadata = {};
   const data = new vscode.NotebookData([cell]);
-  
+
   /* eslint-disable @typescript-eslint/naming-convention */
   // metadata copied from ipynb.newUntitledIpynb:
   // https://github.com/microsoft/vscode/blob/42ce7b7a2eeaa102ee40605a446174fce71c285a/extensions/ipynb/src/ipynbMain.ts#L76
@@ -173,14 +181,17 @@ async function createUntitledNotebook(): Promise<boolean> {
     custom: {
       cells: [],
       metadata: {
-        orig_nbformat: 4
+        orig_nbformat: 4,
       },
       nbformat: 4,
-      nbformat_minor: 2
-    }
+      nbformat_minor: 2,
+    },
   };
 
-  const doc = await vscode.workspace.openNotebookDocument('jupyter-notebook', data);
+  const doc = await vscode.workspace.openNotebookDocument(
+    "jupyter-notebook",
+    data,
+  );
   await vscode.window.showNotebookDocument(doc);
 
   const ed = await editActiveCell();
@@ -189,12 +200,15 @@ async function createUntitledNotebook(): Promise<boolean> {
     return false;
   }
 
-  decorateWhileEmpty(ed, 'Type your question here and press Control+Alt Enter to get a response.');
+  decorateWhileEmpty(
+    ed,
+    "Type your question here and press Control+Alt Enter to get a response.",
+  );
   return true;
 }
 
 const systemPrompt =
-`You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
+  `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
 You can reply with a mixture of Markdown and Python, but instead of using triple quotes
 for a Python code block, use the following format:
 
@@ -228,7 +242,7 @@ async function insertReply(): Promise<boolean> {
 
   try {
     const writer = new NotebookWriter(cell);
-    
+
     const copyResponse = async (input: Reader) => {
       if (!await new BotResponse(input).copy(writer)) {
         console.log("bot response cancelled");
@@ -236,8 +250,12 @@ async function insertReply(): Promise<boolean> {
       }
       await writer.close();
     };
-  
-    const stdin = new ChildPipe(llmPath, ["--system", systemPrompt], copyResponse);
+
+    const stdin = new ChildPipe(
+      llmPath,
+      ["--system", systemPrompt],
+      copyResponse,
+    );
     await stdin.write(prompt);
     await stdin.close();
     return true;
