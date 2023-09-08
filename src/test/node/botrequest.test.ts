@@ -1,13 +1,14 @@
 import expect from "expect";
 import * as fc from "fast-check";
 
-import { chooseBotPrompt } from "../../lib/botrequest";
+import { CellError, CellOutput, chooseBotPrompt } from "../../lib/botrequest";
 
 describe("chooseBotPrompt", () => {
   const checkEmptyPrompt = ([languageId, text]: [string, string]) => {
     const cells = [{ languageId: languageId, text }];
     const cellAt = (idx: number) => cells[idx];
     const prompt = chooseBotPrompt(cellAt, 0);
+
     expect(prompt).toEqual("");
   };
 
@@ -21,6 +22,7 @@ describe("chooseBotPrompt", () => {
       minLength: 1,
     });
     const args = fc.tuple(fc.constantFrom("markdown", "python"), blank);
+
     fc.assert(fc.property(args, checkEmptyPrompt));
   });
 
@@ -29,11 +31,57 @@ describe("chooseBotPrompt", () => {
   );
 
   it("returns the text of a non-empty cell", () => {
-    fc.assert(fc.property(nonEmptyText, (text) => {
-      const cells = [{ languageId: "markdown", text }];
+    const args = fc.tuple(fc.constantFrom("markdown", "python"), nonEmptyText);
+
+    fc.assert(fc.property(args, ([languageId, text]) => {
+      const cells = [{ languageId: languageId, text }];
       const cellAt = (idx: number) => cells[idx];
       const prompt = chooseBotPrompt(cellAt, 0);
-      expect(prompt).toEqual(`%markdown\n${text}\n`);
+
+      expect(prompt).toEqual(`%${languageId}\n${text}\n`);
+    }));
+  });
+
+  it("returns the text and text outputs of a Python cell", () => {
+    const args = fc.tuple(
+      nonEmptyText,
+      fc.array(fc.unicodeString()),
+    );
+
+    fc.assert(fc.property(args, ([text, textOutputs]) => {
+      const outputs = textOutputs.map((s) => ["text", s] as ["text", string]);
+      const cells = [{ languageId: "python", text, outputs }];
+      const cellAt = (idx: number) => cells[idx];
+      const prompt = chooseBotPrompt(cellAt, 0);
+
+      const expectedOutputs = textOutputs.map((output) =>
+        `%output\n${output}\n`
+      )
+        .join("");
+      const expected = `%python\n${text}\n${expectedOutputs}`;
+      expect(prompt).toEqual(expected);
+    }));
+  });
+
+  const anyErrorOutput = fc.tuple(
+    fc.unicodeString(),
+    fc.unicodeString(),
+    fc.unicodeString(),
+  ).map(
+    ([name, message, stack]) => ({ name, message, stack }) as CellError,
+  );
+
+  it("returns the error outputs of a Python cell", () => {
+    fc.assert(fc.property(fc.array(anyErrorOutput), (errors) => {
+      const outputs = errors.map((e) => ["error", e] as CellOutput);
+      const cells = [{ languageId: "python", text: "2 + 2", outputs }];
+      const cellAt = (idx: number) => cells[idx];
+      const prompt = chooseBotPrompt(cellAt, 0);
+
+      const expectedOutputs = errors.map((err) => `%output\n${err.stack}\n`)
+        .join("");
+      const expected = "%python\n" + "2 + 2\n" + expectedOutputs;
+      expect(prompt).toEqual(expected);
     }));
   });
 
@@ -44,6 +92,7 @@ describe("chooseBotPrompt", () => {
     ];
     const cellAt = (idx: number) => cells[idx];
     const prompt = chooseBotPrompt(cellAt, 0);
+
     expect(prompt).toEqual(`%markdown\nfirst\n`);
   });
 

@@ -1,6 +1,11 @@
 import * as vscode from "vscode";
 
-import { editActiveCell, getActiveCell, NotebookWriter } from "./lib/editors";
+import {
+  convertCell,
+  editActiveCell,
+  getActiveCell,
+  NotebookWriter,
+} from "./lib/editors";
 import { BotResponse } from "./lib/botresponse";
 import { ChildPipe } from "./lib/processes";
 import { readAll, Reader } from "./lib/streams";
@@ -89,16 +94,11 @@ function choosePromptStart(
 }
 
 function choosePrompt(): string | undefined {
-  const cell = getActiveCell();
-  if (cell) {
-    const cellAt = (index: number) => {
-      const doc = cell.notebook.cellAt(index).document;
-      return {
-        languageId: doc.languageId,
-        text: doc.getText(),
-      };
-    };
-    return chooseBotPrompt(cellAt, cell.index);
+  const activeCell = getActiveCell();
+  if (activeCell) {
+    const notebook = activeCell.notebook;
+    const cellAt = (index: number) => convertCell(notebook.cellAt(index));
+    return chooseBotPrompt(cellAt, activeCell.index);
   }
 
   const ed = vscode.window.activeTextEditor;
@@ -207,16 +207,17 @@ async function createUntitledNotebook(): Promise<boolean> {
   return true;
 }
 
-const systemPrompt =
+const systemPrompt = () =>
   `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
-You can reply with a mixture of Markdown and Python, but instead of using triple quotes
-for a Python code block, use the following format:
+You can see any Markdown and Python cells from the conversation so far, indicated by #markdown and #python.
+Some Python cells may have been executed by the user, with results indicated by #output.
 
-%python
-print("hello!")
-%markdown
+You can reply using Markdown. Any Python code blocks will be turned into Python cells, but
+not executed until the user chooses.
 
 To display an image in the notebook, write a Python expression that evaluates to the image object.
+
+The current date and time is ${new Date()}.
 `;
 
 /** If in a notebook cell, inserts cells below with the bot's reply. */
@@ -253,7 +254,7 @@ async function insertReply(): Promise<boolean> {
 
     const stdin = new ChildPipe(
       llmPath,
-      ["--system", systemPrompt],
+      ["--system", systemPrompt()],
       copyResponse,
     );
     await stdin.write(prompt);
@@ -273,10 +274,14 @@ async function showPrompt(): Promise<boolean> {
     return false;
   }
 
+  const system = systemPrompt();
+  const content = `System Prompt\n---\n${system}\nUser Prompt\n---\n${prompt}`;
+
   const doc = await vscode.workspace.openTextDocument({
-    content: prompt,
+    content: content,
     language: "plaintext",
   });
+
   await vscode.window.showTextDocument(doc, {
     viewColumn: vscode.ViewColumn.Beside,
     preview: true,

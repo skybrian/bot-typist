@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { Cell, CellOutput } from "./botrequest";
 import { CellWriter } from "./botresponse";
 
 /**
@@ -17,9 +18,11 @@ export async function typeText(
   // insert text
 
   const here = ed.selection.active;
-  if (!await ed.edit((builder) => {
-    builder.insert(here, newText);
-  })) {
+  if (
+    !await ed.edit((builder) => {
+      builder.insert(here, newText);
+    })
+  ) {
     console.log(`typeText: applyEdit failed for: '${newText}'`);
     return false;
   }
@@ -52,6 +55,46 @@ export function getActiveCell(): vscode.NotebookCell | undefined {
   return ed.notebook.cellAt(sel.start);
 }
 
+const textMimeTypes = ["text/plain", "application/vnd.code.notebook.stdout"];
+
+export function convertCell(cell: vscode.NotebookCell): Cell {
+  const doc = cell.document;
+  return {
+    languageId: doc.languageId,
+    text: doc.getText(),
+    outputs: cell.outputs.map(convertOutput),
+  };
+}
+
+function convertOutput(output: vscode.NotebookCellOutput): CellOutput {
+  const decoder = new TextDecoder();
+  for (const mimeType of textMimeTypes) {
+    const item = output.items.find((item) => item.mime === mimeType);
+    if (item) {
+      return ["text", decoder.decode(item.data)];
+    }
+  }
+
+  const error = output.items.find((item) =>
+    item.mime === "application/vnd.code.notebook.error"
+  );
+  if (error) {
+    const json = JSON.parse(decoder.decode(error.data));
+    return ["error", {
+      name: json.name,
+      message: json.message,
+      stack: json.stack,
+    }];
+  }
+
+  const first = output.items.at(0);
+  if (first) {
+    return ["text", `[${output.items[0].mime}] (not shown)`];
+  }
+
+  return ["text", "(empty output)"];
+}
+
 function getEditorAfterNextChange(): Promise<vscode.TextEditor | undefined> {
   return new Promise((resolve) => {
     const disposable = vscode.window.onDidChangeActiveTextEditor((ed) => {
@@ -59,7 +102,7 @@ function getEditorAfterNextChange(): Promise<vscode.TextEditor | undefined> {
       resolve(ed);
     });
   });
-} 
+}
 
 export async function editActiveCell(): Promise<vscode.TextEditor | undefined> {
   const cell = getActiveCell();
@@ -68,7 +111,7 @@ export async function editActiveCell(): Promise<vscode.TextEditor | undefined> {
   }
 
   const nextEditor = getEditorAfterNextChange();
-  await vscode.commands.executeCommand("notebook.cell.edit");  
+  await vscode.commands.executeCommand("notebook.cell.edit");
   const ed = await nextEditor;
 
   return (ed && ed.document === cell.document) ? ed : undefined;
@@ -105,7 +148,7 @@ export class NotebookWriter implements CellWriter {
         if (this.#decoratedEd) {
           this.#decoratedEd.setDecorations(this.#decorationType, []);
         }
-      }
+      },
     });
     this.#disposables.push(this.#decorationType);
 
@@ -141,7 +184,9 @@ export class NotebookWriter implements CellWriter {
       return undefined;
     }
 
-    const ed = vscode.window.visibleTextEditors.find((ed) => ed.document === this.#cell.document);
+    const ed = vscode.window.visibleTextEditors.find((ed) =>
+      ed.document === this.#cell.document
+    );
     if (!ed || ed !== vscode.window.activeTextEditor) {
       this.cancel("Active editor changed.");
       return undefined;
@@ -151,7 +196,9 @@ export class NotebookWriter implements CellWriter {
   }
 
   /** Inserts a new cell after the current one and starts editing it. */
-  private insertCellBelow = async (kind: vscode.NotebookCellKind): Promise<boolean> => {
+  private insertCellBelow = async (
+    kind: vscode.NotebookCellKind,
+  ): Promise<boolean> => {
     const prevEd = this.editor;
     if (!prevEd) {
       return false;
@@ -167,10 +214,14 @@ export class NotebookWriter implements CellWriter {
         return;
       }
       const prev = prevEd.document.lineAt(prevEd.document.lineCount - 2);
-      builder.delete(new vscode.Range(prev.range.end, last.rangeIncludingLineBreak.end));
+      builder.delete(
+        new vscode.Range(prev.range.end, last.rangeIncludingLineBreak.end),
+      );
     });
 
-    const command = kind === vscode.NotebookCellKind.Markup ? "notebook.cell.insertMarkdownCellBelow" : "notebook.cell.insertCodeCellBelow";
+    const command = kind === vscode.NotebookCellKind.Markup
+      ? "notebook.cell.insertMarkdownCellBelow"
+      : "notebook.cell.insertCodeCellBelow";
     await vscode.commands.executeCommand(command);
 
     const ed = await editActiveCell();
@@ -180,7 +231,10 @@ export class NotebookWriter implements CellWriter {
     }
 
     const cell = getActiveCell();
-    if (!cell || cell.index !== this.#cell.index + 1 || cell.kind !== kind || cell.document !== ed.document) {
+    if (
+      !cell || cell.index !== this.#cell.index + 1 || cell.kind !== kind ||
+      cell.document !== ed.document
+    ) {
       console.log("new cell is not the expected one");
       return false;
     }
@@ -203,7 +257,7 @@ export class NotebookWriter implements CellWriter {
 
   startCodeCell(): Promise<boolean> {
     return this.insertCellBelow(vscode.NotebookCellKind.Code);
-  };
+  }
 
   startMarkdownCell(): Promise<boolean> {
     return this.insertCellBelow(vscode.NotebookCellKind.Markup);
@@ -223,7 +277,10 @@ export class NotebookWriter implements CellWriter {
     }
 
     const here = ed.selection.active;
-    if (here.line !== ed.document.lineCount - 1 || here.character < ed.document.lineAt(here.line).text.length) {
+    if (
+      here.line !== ed.document.lineCount - 1 ||
+      here.character < ed.document.lineAt(here.line).text.length
+    ) {
       this.cancel("Cursor not at end of cell.");
       return false;
     }

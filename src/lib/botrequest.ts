@@ -1,9 +1,14 @@
-import { text } from "stream/consumers";
-
-interface Cell {
+export interface Cell {
   languageId: string;
   text: string;
+  outputs?: CellOutput[];
 }
+
+export type CellOutput =
+  | ["text", string]
+  | ["error", CellError];
+
+export type CellError = { name: string; message: string; stack: string };
 
 const isHorizontalRule = (line: string): boolean => {
   return /^[-*_]{3,}$/.test(line.trim());
@@ -44,8 +49,23 @@ export function chooseBotPrompt(
 ): string {
   let prompt = "";
 
-  const pushCell = (languageId: string, text: string) => {
-    prompt += `%${languageId}\n${text}\n`;
+  const pushCell = (cell: Cell, text: string) => {
+    const outputs = cell.outputs || [];
+    const outputText = outputs.map((output) => `%output\n${output}\n`).join("");
+    prompt += `%${cell.languageId}\n${text}\n`;
+    for (const output of outputs) {
+      switch (output[0]) {
+        case "text":
+          prompt += `%output\n${output[1]}\n`;
+          break;
+        case "error":
+          const error = output[1];
+          // The stack includes the error name and message.
+          // Not sure what the format is, but the bot can likely figure it out.
+          prompt += `%output\n${error.stack}\n`;
+          break;
+      }
+    }
   };
 
   for (let i = 0; i <= cellIndex; i++) {
@@ -53,7 +73,7 @@ export function chooseBotPrompt(
     if (cell.text.trim() === "") {
       continue;
     } else if (cell.languageId !== "markdown") {
-      pushCell(cell.languageId, cell.text);
+      pushCell(cell, cell.text);
       continue;
     }
 
@@ -62,7 +82,7 @@ export function chooseBotPrompt(
       prompt = "";
     }
     if (parsed[1].trim() !== "") {
-      pushCell(cell.languageId, parsed[1]);
+      pushCell(cell, parsed[1]);
     }
   }
 
