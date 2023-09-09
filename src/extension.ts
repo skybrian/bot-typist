@@ -10,7 +10,7 @@ import {
 import { BotResponse } from "./lib/botresponse";
 import { ChildPipe } from "./lib/processes";
 import { readAll, Reader } from "./lib/streams";
-import { chooseBotPrompt } from "./lib/botrequest";
+import { chooseBotPrompt, chooseSystemPrompt } from "./lib/botrequest";
 
 function getCommandPath() {
   return vscode.workspace.getConfiguration("bot-typist").get<string>(
@@ -208,19 +208,6 @@ async function createUntitledNotebook(): Promise<boolean> {
   return true;
 }
 
-const systemPrompt = () =>
-  `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
-You can see any Markdown and Python cells from the conversation so far, indicated by #markdown and #python.
-Some Python cells may have been executed by the user, with results indicated by #output.
-
-You can reply using Markdown. Any Python code blocks will be turned into Python cells, but
-not executed until the user chooses.
-
-To display an image in the notebook, write a Python expression that evaluates to the image object.
-
-The current date and time is ${new Date()}.
-`;
-
 /** If in a notebook cell, inserts cells below with the bot's reply. */
 async function insertReply(): Promise<boolean> {
   let cell = getActiveCell();
@@ -255,7 +242,7 @@ async function insertReply(): Promise<boolean> {
 
     const stdin = new ChildPipe(
       llmPath,
-      ["--system", systemPrompt()],
+      ["--system", chooseSystemPrompt()],
       copyResponse,
     );
     await stdin.write(prompt);
@@ -275,7 +262,7 @@ async function showPrompt(): Promise<boolean> {
     return false;
   }
 
-  const system = systemPrompt();
+  const system = chooseSystemPrompt();
   const content = `System Prompt\n---\n${system}\nUser Prompt\n---\n${prompt}`;
 
   const doc = await vscode.workspace.openTextDocument({
