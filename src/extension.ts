@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 
 import {
   convertCell,
-  editActiveCell,
+  editCell,
   getActiveCell,
   NotebookWriter,
 } from "./lib/notebooks";
@@ -167,22 +167,42 @@ function decorateWhileEmpty(
 }
 
 async function createUntitledNotebook(): Promise<boolean> {
-  const cell = new vscode.NotebookCellData(
-    vscode.NotebookCellKind.Markup,
-    "",
-    "markdown",
-  );
-  cell.metadata = {};
-  const data = new vscode.NotebookData([cell]);
+  const cells = [
+    new vscode.NotebookCellData(
+      vscode.NotebookCellKind.Markup,
+      "Type your question in the next cell and then type **Control-Alt Enter** to get a response. (Command-return on a Mac.)\n" +
+        "\n" +
+        "A horizonal rule in a Markdown cell indicates the start of a chat. Anything above it won't be seen by the bot.\n" +
+        "\n" +
+        "---\n",
+      "markdown",
+    ),
+    new vscode.NotebookCellData(
+      vscode.NotebookCellKind.Markup,
+      "",
+      "markdown",
+    ),
+  ];
+  cells[0].metadata = {};
+  cells[1].metadata = {};
+  const data = new vscode.NotebookData(cells);
 
   /* eslint-disable @typescript-eslint/naming-convention */
-  // metadata copied from ipynb.newUntitledIpynb:
+  // some metadata copied from ipynb.newUntitledIpynb:
   // https://github.com/microsoft/vscode/blob/42ce7b7a2eeaa102ee40605a446174fce71c285a/extensions/ipynb/src/ipynbMain.ts#L76
   data.metadata = {
     custom: {
       cells: [],
       metadata: {
         orig_nbformat: 4,
+        // Try to select a Python 3 kernel.
+        // These settings assume a virtual environment containing Jupyter.
+        // See: jupyter kernelspec list
+        kernelspec: {
+          display_name: "Python 3",
+          language: "python",
+          name: "python3",
+        },
       },
       nbformat: 4,
       nbformat_minor: 2,
@@ -195,7 +215,7 @@ async function createUntitledNotebook(): Promise<boolean> {
   );
   await vscode.window.showNotebookDocument(doc);
 
-  const ed = await editActiveCell();
+  const ed = await editCell(doc.cellAt(1));
   if (!ed) {
     console.log("createUntitledNotebook: couldn't edit cell");
     return false;
@@ -203,7 +223,7 @@ async function createUntitledNotebook(): Promise<boolean> {
 
   decorateWhileEmpty(
     ed,
-    "Type your question here and press Control+Alt Enter to get a response.",
+    "Type your question here.",
   );
   return true;
 }

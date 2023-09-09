@@ -66,13 +66,42 @@ function replaceControlChars(
   );
 }
 
-export function getEditorAfterNextChange(): Promise<
+export function waitForEditor(
+  expectedDoc: vscode.TextDocument,
+  timeout: number = 5000,
+): Promise<
   vscode.TextEditor | undefined
 > {
   return new Promise((resolve) => {
+    const ed = vscode.window.activeTextEditor;
+    if (ed?.document === expectedDoc) {
+      return resolve(ed);
+    }
+
+    let resolved = false;
     const disposable = vscode.window.onDidChangeActiveTextEditor((ed) => {
+      if (!ed) {
+        console.log("waitForEditor: no editor, skipping event");
+        return;
+      } else if (ed.document !== expectedDoc) {
+        console.log("waitForEditor: wrong document, skipping event");
+        return;
+      }
+      console.log("waitForEditor: editor became active");
       disposable.dispose();
       resolve(ed);
+      resolved = true;
     });
+
+    setTimeout(() => {
+      if (resolved) {
+        return;
+      }
+      console.log("waitForEditor: timeout");
+      disposable.dispose();
+      resolve(undefined);
+    }, timeout);
+
+    console.log("waitForEditor: waiting");
   });
 }

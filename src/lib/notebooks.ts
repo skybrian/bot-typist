@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 
 import { Cell, CellOutput } from "./botrequest";
 import { CellWriter } from "./botresponse";
-import { getEditorAfterNextChange, typeText } from "./editors";
+import { typeText, waitForEditor } from "./editors";
 
 export function getActiveCell(): vscode.NotebookCell | undefined {
   const ed = vscode.window.activeNotebookEditor;
@@ -56,17 +56,29 @@ function convertOutput(output: vscode.NotebookCellOutput): CellOutput {
   return ["text", "(empty output)"];
 }
 
-export async function editActiveCell(): Promise<vscode.TextEditor | undefined> {
-  const cell = getActiveCell();
-  if (!cell) {
+export async function editCell(
+  cell: vscode.NotebookCell,
+): Promise<vscode.TextEditor | undefined> {
+  // Already editing?
+  const textEd = vscode.window.activeTextEditor;
+  if (textEd?.document === cell.document) {
+    return textEd;
+  }
+
+  const noteEd = vscode.window.activeNotebookEditor;
+  if (!noteEd) {
+    console.log("no notebook editor");
     return undefined;
   }
 
-  const nextEditor = getEditorAfterNextChange();
-  await vscode.commands.executeCommand("notebook.cell.edit");
-  const ed = await nextEditor;
+  const cellRange = new vscode.NotebookRange(cell.index, cell.index);
+  noteEd.revealRange(cellRange, vscode.NotebookEditorRevealType.Default);
 
-  return (ed && ed.document === cell.document) ? ed : undefined;
+  noteEd.selection = new vscode.NotebookRange(cell.index, cell.index + 1);
+
+  const nextEditor = waitForEditor(cell.document);
+  await vscode.commands.executeCommand("notebook.cell.edit");
+  return await nextEditor;
 }
 
 export class NotebookWriter implements CellWriter {
@@ -185,20 +197,20 @@ export class NotebookWriter implements CellWriter {
         : "notebook.cell.insertCodeCellBelow";
       await vscode.commands.executeCommand(command);
 
-      const ed = await editActiveCell();
+      const cell = getActiveCell();
+      if (
+        !cell || cell.index !== this.#cell.index + 1 || cell.kind !== kind
+      ) {
+        console.log("new cell is not the expected one");
+        return false;
+      }
+
+      const ed = await editCell(cell);
       if (!ed) {
         console.log("couldn't edit new cell");
         return false;
       }
 
-      const cell = getActiveCell();
-      if (
-        !cell || cell.index !== this.#cell.index + 1 || cell.kind !== kind ||
-        cell.document !== ed.document
-      ) {
-        console.log("new cell is not the expected one");
-        return false;
-      }
       this.#cell = cell;
 
       this.decorate(ed);
