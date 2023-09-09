@@ -1,154 +1,174 @@
-import * as assert from "assert";
 import * as vscode from "vscode";
+import { expect } from "expect";
+import * as fc from "fast-check";
 
-import { NotebookWriter } from "../../lib/editors";
+import { typeText } from "../../lib/editors";
 
-interface Cell {
-  lang: string;
-  text: string;
-}
+const startPos = new vscode.Position(0, 0);
 
-async function setupNotebook(cells: Cell[]): Promise<vscode.NotebookEditor> {
-  const langToKind = (lang: string): vscode.NotebookCellKind => {
-    switch (lang) {
-      case "markdown":
-        return vscode.NotebookCellKind.Markup;
-      case "python":
-        return vscode.NotebookCellKind.Code;
-      default:
-        throw new Error(`Unknown language: ${lang}`);
-    }
-  };
-  const cellData = cells.map((c) =>
-    new vscode.NotebookCellData(langToKind(c.lang), c.text, c.lang)
-  );
-  const notebook = await vscode.workspace.openNotebookDocument(
-    "jupyter-notebook",
-    new vscode.NotebookData(cellData),
-  );
-  return vscode.window.showNotebookDocument(notebook);
-}
+describe("typeText", function () {
+  let ed: vscode.TextEditor;
 
-function checkCells(expectedCells: string[]) {
-  const noteEd = vscode.window.activeNotebookEditor;
-  assert.ok(noteEd);
-  for (let i = 0; i < expectedCells.length; i++) {
-    if (i >= noteEd.notebook.cellCount) {
-      assert.fail(`cell ${i} doesn't exist`);
-    }
-    const cell: vscode.NotebookCell = noteEd.notebook.cellAt(i);
-    assert.strictEqual(cell.document.getText(), expectedCells[i]);
-  }
-  assert.strictEqual(noteEd.notebook.cellCount, expectedCells.length);
-}
-
-function checkCellKinds(expectedKinds: vscode.NotebookCellKind[]) {
-  const noteEd = vscode.window.activeNotebookEditor;
-  assert.ok(noteEd);
-  for (let i = 0; i < expectedKinds.length; i++) {
-    assert.ok(i < noteEd.notebook.cellCount);
-    const cell: vscode.NotebookCell = noteEd.notebook.cellAt(i);
-    assert.strictEqual(cell.kind, expectedKinds[i], `cell ${i} kinds differ`);
-  }
-  assert.strictEqual(noteEd.notebook.cellCount, expectedKinds.length);
-}
-
-function checkCursor(
-  expectedCell: number,
-  expectedLine: number,
-  expectedCharacter: number,
-) {
-  const noteEd = vscode.window.activeNotebookEditor;
-  assert.ok(noteEd);
-  assert.strictEqual(noteEd.selection.start, expectedCell);
-  assert.strictEqual(noteEd.selection.end, expectedCell + 1);
-  const cell = noteEd.notebook.cellAt(expectedCell);
-
-  const ed = vscode.window.activeTextEditor;
-  assert.ok(ed);
-  assert.strictEqual(ed.document, cell.document);
-  assert.strictEqual(ed.selection.active.line, expectedLine);
-  assert.strictEqual(ed.selection.active.character, expectedCharacter);
-}
-
-describe("NotebookWriter", () => {
-  before(async function () {
-    const noteEd = await setupNotebook([{
-      lang: "python",
-      text: "First line\n",
-    }]);
-    checkCellKinds([vscode.NotebookCellKind.Code]);
-
-    assert.strictEqual(noteEd.selection.start, 0);
-    assert.strictEqual(noteEd.selection.end, 1);
-    this.noteEd = noteEd;
-
-    const ed = vscode.window.activeTextEditor;
-    assert.ok(ed, "no active editor");
-    ed.selection = new vscode.Selection(1, 0, 1, 0);
-    this.ed = ed;
+  before(async () => {
+    ed = await setupTextEditor();
   });
 
-  after(async function () {
+  it("inserts text into an empty text editor", async () => {
+    await clear(ed);
+    expect(await typeText(ed, "hello!")).toBeTruthy();
+    expect(getTextSplit(ed)).toEqual(showPair("hello!", ""));
+  });
+
+  const controlChars = [
+    charRange(0, 9),
+    charRange(0xb, 0x1f),
+    charRange(0x7f, 0x9f),
+    [
+      "\u2028",
+    ],
+  ].flat();
+
+  it("replaces control characters with a unicode replacement character", async () => {
+    for (const char of controlChars) {
+      await clear(ed);
+      expect(await typeText(ed, char)).toBeTruthy();
+      expect(getTextSplit(ed)).toEqual(showPair("\uFFFD", ""));
+    }
+  });
+
+  const checkTypeable = async (
+    [first, middle, last]: [string, string, string],
+  ) => {
+    await clear(ed);
+
+    expect(await typeText(ed, first)).toBeTruthy();
+    expect(getTextSplit(ed)).toBe(showPair(first, ""));
+    const endOfFirst = ed.selection;
+
+    expect(await typeText(ed, last)).toBeTruthy();
+    expect(getTextSplit(ed)).toEqual(showPair(first + last, ""));
+
+    ed.selection = endOfFirst;
+    expect(getTextSplit(ed)).toEqual(showPair(first, last));
+
+    expect(await typeText(ed, middle)).toBeTruthy();
+    expect(getTextSplit(ed)).toEqual(showPair(first + middle, last));
+  };
+
+  it("can type the empty string", async () => {
+    await checkTypeable(["", "", ""]);
+    await checkTypeable(["", "", " "]);
+  });
+
+  it("can type the empty string or another character", async () => {
+    const choice = fc.constantFrom("", "a", " ");
+    const args = fc.tuple(choice, choice, choice);
+    await fc.assert(fc.asyncProperty(args, checkTypeable));
+  });
+
+  it("can type any non-control ascii character", async () => {
+    for (const char of charRange(0x20, 0x7e)) {
+      await checkTypeable([char, char, char]);
+    }
+  });
+
+  const anyTypeableChar = fc.unicode().filter((c) => !controlChars.includes(c));
+
+  it("can type any non-control unicode character", async function () {
+    this.timeout(10000);
+    await fc.assert(
+      fc.asyncProperty(anyTypeableChar, async (char) => {
+        await clear(ed);
+        expect(await typeText(ed, char)).toBeTruthy();
+        expect(getTextSplit(ed)).toEqual(showPair(char, ""));
+      }),
+      { numRuns: 1000 },
+    );
+  });
+
+  const anyTypeableText = fc.stringOf(
+    fc.oneof(
+      fc.constantFrom("", "\n"),
+      fc.stringOf(anyTypeableChar, { maxLength: 5 }),
+    ),
+  );
+
+  it("inserts text into a document out of order", async function () {
+    this.timeout(10000);
+    const args = fc.tuple(anyTypeableText, anyTypeableText, anyTypeableText);
+    await fc.assert(fc.asyncProperty(args, checkTypeable), { numRuns: 1000 });
+  });
+
+  after(async () => {
     await vscode.commands.executeCommand("workbench.action.closeActiveEditor");
   });
-
-  it("creates a writer for an active notebook cell", async function () {
-    const cell = this.noteEd.notebook.cellAt(0);
-    this.writer = new NotebookWriter(cell);
-  });
-
-  describe("write", () => {
-    it("starts a new markdown cell automatically", async function () {
-      this.timeout(3000);
-      const edit = "Next line\n";
-      const writer = this.writer as NotebookWriter;
-      assert.ok(writer);
-      assert.ok(await writer.write(edit), "write failed");
-      checkCells(["First line", "Next line\n"]);
-      checkCellKinds([
-        vscode.NotebookCellKind.Code,
-        vscode.NotebookCellKind.Markup,
-      ]);
-    });
-
-    it("moves the cursor", function () {
-      checkCursor(1, 1, 0);
-    });
-  });
-
-  describe("startMarkdownCell", () => {
-    it("appends a markdown cell", async function () {
-      assert.ok(await this.writer.startMarkdownCell());
-      checkCells(["First line", "Next line", ""]);
-      checkCellKinds([
-        vscode.NotebookCellKind.Code,
-        vscode.NotebookCellKind.Markup,
-        vscode.NotebookCellKind.Markup,
-      ]);
-    });
-
-    it("moves the cursor", function () {
-      checkCursor(2, 0, 0);
-    });
-  });
-
-  describe("write", () => {
-    it("writes to the new cell", async function () {
-      assert.ok(await this.writer.write("Cell 2\n"), "write failed");
-      checkCells(["First line", "Next line", "Cell 2\n"]);
-    });
-
-    it("moves the cursor", function () {
-      checkCursor(2, 1, 0);
-    });
-  });
-
-  describe("close", () => {
-    it("close adds a markdown cell for new input", async function () {
-      assert.ok(await this.writer.close());
-      checkCells(["First line", "Next line", "Cell 2", ""]);
-      checkCursor(3, 0, 0);
-    });
-  });
 });
+
+async function setupTextEditor(): Promise<vscode.TextEditor> {
+  const doc = await vscode.workspace.openTextDocument({ content: "" });
+  return await vscode.window.showTextDocument(doc);
+}
+
+async function clear(ed: vscode.TextEditor): Promise<void> {
+  const result = await ed.edit((b) => {
+    b.delete(new vscode.Range(0, 0, ed.document.lineCount, 0));
+  });
+  expect(result).toBeTruthy();
+  expect(getTextSplit(ed)).toEqual(showPair("", ""));
+}
+
+function getTextSplit(ed: vscode.TextEditor): string {
+  expect(ed.selections.length).toEqual(1);
+  expect(ed.selection.end).toEqual(ed.selection.start);
+  const beforeRange = new vscode.Range(startPos, ed.selection.start);
+  const afterRange = new vscode.Range(ed.selection.start, endPos(ed.document));
+  return showPair(
+    ed.document.getText(beforeRange),
+    ed.document.getText(afterRange),
+  );
+}
+
+function endPos(doc: vscode.TextDocument): vscode.Position {
+  return new vscode.Position(
+    doc.lineCount - 1,
+    doc.lineAt(doc.lineCount - 1).text.length,
+  );
+}
+
+function showPair(before: string, after: string): string {
+  return showString(before) + " + " + showString(after);
+}
+
+function showString(s: string): string {
+  return `'${escapeNonAsciiPrintable(s)}' (${s.length})`;
+}
+
+function escapeNonAsciiPrintable(str: string): string {
+  let result = "";
+
+  for (const char of str) {
+    const codePoint = str.codePointAt(0) as number;
+
+    if (isAsciiPrintable(char)) {
+      result += char;
+    } else {
+      const codePoint = str.codePointAt(0) as number;
+      result += `\\u${codePoint.toString(16).padStart(4, "0")}`;
+    }
+  }
+
+  return result;
+}
+
+function isAsciiPrintable(char: string) {
+  const codePoint = char.codePointAt(0) as number;
+  return codePoint >= 0x20 && codePoint <= 0x7E;
+}
+
+function charRange(start: number, end: number): string[] {
+  const result = [];
+  for (let i = start; i <= end; i++) {
+    result.push(String.fromCodePoint(i));
+  }
+  return result;
+}

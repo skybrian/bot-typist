@@ -5,7 +5,8 @@ import {
   editActiveCell,
   getActiveCell,
   NotebookWriter,
-} from "./lib/editors";
+} from "./lib/notebooks";
+
 import { BotResponse } from "./lib/botresponse";
 import { ChildPipe } from "./lib/processes";
 import { readAll, Reader } from "./lib/streams";

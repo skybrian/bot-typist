@@ -1,3 +1,4 @@
+import { sleep } from "../../lib/async";
 import expect from "expect";
 import * as fc from "fast-check";
 import { anyChunksOf, concat, TestReader } from "../lib/generators";
@@ -13,41 +14,82 @@ interface Cell {
 
 class TestCellWriter implements CellWriter {
   cells: Cell[] = [];
+  writing = false;
   done = false;
 
   async write(text: string): Promise<boolean> {
-    if (this.done) {
-      throw new Error("write after done");
+    if (this.writing) {
+      throw new Error("already writing");
     }
-    if (this.cells.length === 0) {
-      await this.startMarkdownCell();
+    this.writing = true;
+    await sleep(0);
+
+    try {
+      if (this.done) {
+        throw new Error("write after done");
+      }
+      if (this.cells.length === 0) {
+        this.cells.push({ lang: "markdown", text: "" });
+      }
+      this.cells[this.cells.length - 1].text += text;
+      return true;
+    } finally {
+      this.writing = false;
     }
-    this.cells[this.cells.length - 1].text += text;
-    return true;
   }
 
   async startCodeCell(): Promise<boolean> {
-    if (this.done) {
-      throw new Error("startCodeCell after done");
+    if (this.writing) {
+      throw new Error("already writing");
     }
-    this.cells.push({ lang: "python", text: "" });
-    return true;
+    this.writing = true;
+    await sleep(0);
+
+    try {
+      if (this.done) {
+        throw new Error("startCodeCell after done");
+      }
+      this.cells.push({ lang: "python", text: "" });
+      return true;
+    } finally {
+      this.writing = false;
+    }
   }
 
   async startMarkdownCell(): Promise<boolean> {
-    if (this.done) {
-      throw new Error("startMarkdownCell after done");
+    if (this.writing) {
+      throw new Error("already writing");
     }
-    this.cells.push({ lang: "markdown", text: "" });
-    return true;
+    this.writing = true;
+    await sleep(0);
+
+    try {
+      if (this.done) {
+        throw new Error("startMarkdownCell after done");
+      }
+      this.cells.push({ lang: "markdown", text: "" });
+      return true;
+    } finally {
+      this.writing = false;
+    }
   }
 
   async close(): Promise<boolean> {
-    if (this.done) {
-      throw new Error("close after done");
+    if (this.writing) {
+      throw new Error("already writing");
     }
-    this.done = true;
-    return true;
+    this.writing = true;
+    await sleep(0);
+
+    try {
+      if (this.done) {
+        throw new Error("close after done");
+      }
+      this.done = true;
+      return true;
+    } finally {
+      this.writing = false;
+    }
   }
 }
 
@@ -202,7 +244,7 @@ describe("BotResponse", () => {
     it("writes a message when there's no response", async () => {
       const reader = new TestReader([]);
       const writer = new TestCellWriter();
-      expect(await new BotResponse(reader).copy(writer)).toBe(true);
+      expect(await (new BotResponse(reader).copy(writer))).toBe(true);
       expect(writer.cells).toEqual([{
         "lang": "markdown",
         "text": "bot: (no response)",
@@ -216,7 +258,7 @@ describe("BotResponse", () => {
       await fc.assert(fc.asyncProperty(anyNonCue, async ([text]) => {
         const reader = new TestReader([text]);
         const writer = new TestCellWriter();
-        expect(await new BotResponse(reader).copy(writer)).toBe(true);
+        expect(await (new BotResponse(reader).copy(writer))).toBe(true);
         expect(writer.cells).toEqual([{
           lang: "markdown",
           text: `bot: ${text}`,
@@ -237,7 +279,7 @@ describe("BotResponse", () => {
       await fc.assert(fc.asyncProperty(input, async (text) => {
         const reader = new TestReader([text]);
         const writer = new TestCellWriter();
-        expect(await new BotResponse(reader).copy(writer)).toBe(true);
+        expect(await (new BotResponse(reader).copy(writer))).toBe(true);
         const expected = text.trimStart();
         expect(writer.cells).toEqual([{ lang: "markdown", text: expected }]);
       }));
@@ -287,7 +329,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(args, async ({ chunked, cell }) => {
           const reader = new TestReader(chunked.chunks);
           const writer = new TestCellWriter();
-          expect(await new BotResponse(reader).copy(writer)).toBe(true);
+          expect(await (new BotResponse(reader).copy(writer))).toBe(true);
           expect(writer.cells).toEqual([cell]);
         }),
       );
@@ -317,6 +359,21 @@ describe("BotResponse", () => {
           const writer = new TestCellWriter();
           expect(await new BotResponse(reader).copy(writer)).toBe(true);
           expect(writer.cells).toEqual([cell]);
+        }),
+      );
+    });
+
+    it("copies a Python code block followed by a Markdown cell", async () => {
+      const args: fc.Arbitrary<{ input: string; cell: Cell }[]> = fc.tuple(
+        anyPythonInCodeBlock,
+        anyMarkdownParse,
+      );
+      await fc.assert(
+        fc.asyncProperty(anyCellsAndChunks, async ([cells, chunks]) => {
+          const reader = new TestReader(chunks);
+          const writer = new TestCellWriter();
+          expect(await new BotResponse(reader).copy(writer)).toBe(true);
+          expect(writer.cells).toEqual(cells);
         }),
       );
     });

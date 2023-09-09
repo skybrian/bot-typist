@@ -148,7 +148,7 @@ export class BotResponse {
   }
 
   async copyCodeBlock(output: CellWriter): Promise<boolean> {
-    output.startCodeCell();
+    await output.startCodeCell();
 
     while (!await this.#stream.skipToken("```\n")) {
       if (this.atEnd) {
@@ -165,7 +165,7 @@ export class BotResponse {
       !this.atEnd && !await this.matchHeaderLine() &&
       !await this.#stream.startsWith("```python\n")
     ) {
-      output.startMarkdownCell();
+      await output.startMarkdownCell();
     }
     return true;
   }
