@@ -5,7 +5,6 @@ import { anyChunksOf, concat, TestReader } from "../lib/generators";
 
 import { Scanner } from "../../lib/scanner";
 import { StringWriter } from "../../lib/streams";
-import exp = require("constants");
 
 describe("Scanner", () => {
   describe("pull", () => {
@@ -31,6 +30,15 @@ describe("Scanner", () => {
           },
         ),
       );
+    });
+
+    it("doesn't split a surrogate pair", async () => {
+      const pair = "😀";
+      expect(pair.length).toBe(2);
+
+      const scanner = new Scanner(new TestReader([pair[0], pair[1]]));
+      expect(await scanner.pull()).toBe(true);
+      expect(scanner.buffer).toEqual(pair);
     });
   });
 
@@ -254,6 +262,36 @@ describe("Scanner", () => {
           expect(await scanner.takeBlankLine()).toEqual(expected);
         }),
       );
+    });
+  });
+
+  describe("takeEmoji", async () => {
+    it("returns an empty string when there's no input", async () => {
+      const scanner = new Scanner(new TestReader([]));
+      expect(await scanner.takeEmoji()).toEqual("");
+    });
+
+    for (const char of ["😀", "🤖", "🪗"]) {
+      it(`matches "${char}"`, async () => {
+        fc.asyncProperty(
+          anyChunksOf(fc.constant(char)),
+          async ({ original, chunks }) => {
+            const scanner = new Scanner(new TestReader(chunks));
+            expect(await scanner.takeEmoji()).toEqual(original);
+          },
+        );
+      });
+    }
+
+    it("doesn't pull if the buffer contains another character", async () => {
+      for (let i = 0; i < 256; i++) {
+        const char = String.fromCharCode(i);
+        const scanner = new Scanner(new TestReader([char, "x"]));
+        await scanner.pull();
+        expect(scanner.buffer).toEqual(char);
+        expect(await scanner.takeEmoji()).toEqual("");
+        expect(scanner.buffer).toEqual(char);
+      }
     });
   });
 

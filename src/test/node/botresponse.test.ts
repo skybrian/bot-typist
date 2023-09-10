@@ -183,17 +183,17 @@ describe("BotResponse", () => {
     ...Array.from("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"),
   );
   const anyDigit = fc.constantFrom(...Array.from("0123456789"));
-  const anyLettersOrDigits = fc.stringOf(fc.oneof(anyLetter, anyDigit), {
-    minLength: 1,
-  });
-  const anyCue = anyLettersOrDigits.map((s) => s + ": ");
+  const anyCueChar = fc.oneof(anyLetter, anyDigit, fc.constantFrom("🤖", " "));
+  const anyCue = fc.stringOf(anyCueChar, { minLength: 1 }).filter((s) =>
+    s.trim() === s
+  ).map((s) => s + ": ");
 
   describe("copyOrAddCue", () => {
     it("writes the default cue when there's no input", async () => {
-      const response = new BotResponse(new TestReader([]));
+      const response = new BotResponse(new TestReader([]), "🤖 bot");
       const writer = new StringWriter();
       expect(await response.copyOrAddCue(writer)).toBe(true);
-      expect(writer.buffer).toBe("bot: ");
+      expect(writer.buffer).toBe("🤖 bot: ");
     });
 
     it("removes any leading whitespace from the input", async () => {
@@ -244,10 +244,11 @@ describe("BotResponse", () => {
     it("writes a message when there's no response", async () => {
       const reader = new TestReader([]);
       const writer = new TestCellWriter();
-      expect(await (new BotResponse(reader).copy(writer))).toBe(true);
+      const response = new BotResponse(reader, "robot");
+      expect(await response.copy(writer)).toBe(true);
       expect(writer.cells).toEqual([{
         "lang": "markdown",
-        "text": "bot: (no response)",
+        "text": "robot: (no response)",
       }]);
     });
 

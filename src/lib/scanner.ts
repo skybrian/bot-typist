@@ -1,4 +1,7 @@
+import { start } from "repl";
 import { DONE, Reader, Writer } from "./streams";
+
+const isHighSurrogate = (c: string) => c >= "\uD800" && c <= "\uDBFF";
 
 /**
  * A Scanner combines a Reader and a buffer to represent a position
@@ -42,6 +45,11 @@ export class Scanner {
         return false;
       } else if (chunk !== "") {
         this.#buffer += chunk;
+        if (isHighSurrogate(chunk[chunk.length - 1])) {
+          // don't split a surrogate pair
+          // (TODO: Maybe keep the partial surrogate outside the buffer?)
+          continue;
+        }
         return true;
       }
     }
@@ -193,9 +201,41 @@ export class Scanner {
   }
 
   /**
+   * Returns the next character if it's an emoji.
+   * (Currently just Emoji_Presentation for now.)
+   *
+   * Otherwise, returns the empty string.
+   * Pulls more input if needed.
+   */
+  async takeEmoji(): Promise<string> {
+    const emojiStart = /^(\p{Emoji_Presentation})/u;
+    const noEmojiStart = /^(?!\p{Emoji_Presentation})/u;
+
+    while (true) {
+      const match = emojiStart.exec(this.#buffer);
+      if (match) {
+        // complete emoji
+        const result = match[0];
+        this.#buffer = this.#buffer.slice(result.length);
+        return result;
+      }
+      if (noEmojiStart.test(this.#buffer)) {
+        // not an emoji
+        return "";
+      }
+
+      // partial emoji; pull more input
+      if (!await this.pull()) {
+        // end of input
+        return "";
+      }
+    }
+  }
+
+  /**
    * Copies the next line to a Writer, including the terminating newline if present.
    * Pulls input until a newline or the end of input is reached.
-   * 
+   *
    * Does nothing at the end of input. (The caller should check this using {@link atEnd}.)
    *
    * @returns false if the Writer cancels.

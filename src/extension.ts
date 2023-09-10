@@ -253,7 +253,7 @@ async function insertReply(): Promise<boolean> {
     const writer = new NotebookWriter(cell);
 
     const copyResponse = async (input: Reader) => {
-      if (!await new BotResponse(input).copy(writer)) {
+      if (!await new BotResponse(input, "🤖").copy(writer)) {
         console.log("bot response cancelled");
         return;
       }

@@ -16,13 +16,15 @@ export interface CellWriter extends WriteCloser<boolean> {
 }
 
 const cueChars =
-  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ";
 
 export class BotResponse {
   #stream: Scanner;
+  #defaultCue: string;
 
-  constructor(stream: Reader) {
+  constructor(stream: Reader, defaultCue = "bot") {
     this.#stream = new Scanner(stream);
+    this.#defaultCue = defaultCue;
   }
 
   /**
@@ -41,7 +43,7 @@ export class BotResponse {
     await this.skipBlankLines();
 
     if (this.atEnd) {
-      if (!await output.write("bot: (no response)")) {
+      if (!await output.write(`${this.#defaultCue}: (no response)`)) {
         return false;
       }
       return true;
@@ -112,15 +114,28 @@ export class BotResponse {
     }
   }
 
-  async copyOrAddCue(output: Writer, defaultName = "bot"): Promise<boolean> {
+  async copyOrAddCue(output: Writer): Promise<boolean> {
     await this.#stream.takeMatchingPrefix(" \t");
-    const name = await this.#stream.takeMatchingPrefix(cueChars);
+    let name = "";
+    while (true) {
+      const char = await this.#stream.takeMatchingChar(cueChars);
+      if (char) {
+        name += char;
+        continue;
+      }
+      const emoji = await this.#stream.takeEmoji();
+      if (emoji) {
+        name += emoji;
+        continue;
+      }
+      break;
+    }
     if (name && await this.#stream.skipToken(": ")) {
       // already present
       return await output.write(name + ": ");
     } else {
       // add it
-      return await output.write(defaultName + ": " + name);
+      return await output.write(this.#defaultCue + ": " + name);
     }
   }
 
