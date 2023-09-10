@@ -48,7 +48,10 @@ export class ChildPipe<T> implements WriteCloser<T> {
       if (signal) {
         this.#stop(`process closed with signal ${signal}`);
       } else {
-        this.#stop(`process closed with exit code ${code}`);
+        const reason = code === 0
+          ? undefined
+          : `process closed with exit code ${code}`;
+        this.#stop(reason);
       }
     });
   }

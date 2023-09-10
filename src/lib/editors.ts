@@ -87,7 +87,6 @@ export function waitForEditor(
         console.log("waitForEditor: wrong document, skipping event");
         return;
       }
-      console.log("waitForEditor: editor became active");
       disposable.dispose();
       resolve(ed);
       resolved = true;
@@ -101,7 +100,5 @@ export function waitForEditor(
       disposable.dispose();
       resolve(undefined);
     }, timeout);
-
-    console.log("waitForEditor: waiting");
   });
 }

@@ -51,7 +51,16 @@
         "key": "cmd-enter",
         "when": "inputFocus && notebookEditorFocused"
       }
-    ]
+    ],
+    "menus": {
+      "notebook/cell/title": [
+        {
+          "command": "bot-typist.insert-reply",
+          "when": "inputFocus && notebookEditorFocused",
+          "group": "2_insert@1000"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

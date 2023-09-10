@@ -48,14 +48,18 @@ async function checkCommandPath(
   );
 
   try {
-    const first = await Promise.race([child.close(), timeout]);
+    const first = await Promise.race([child.close(), timeout]) as
+      | string
+      | typeof TIMEOUT;
 
     if (first === TIMEOUT) {
       child.kill();
       return ConfigState.commandTimedOut;
     }
 
-    console.log(`llm --version output: ${first}`);
+    if (!first.startsWith("llm, version ")) {
+      console.log(`llm --version output: ${first}`);
+    }
     return ConfigState.ok;
   } catch (e) {
     console.log(`llm error: ${e}`);
@@ -166,25 +170,23 @@ function decorateWhileEmpty(
   }));
 }
 
+const instructions = "# AI Chat Dialog\n" +
+  "\n" +
+  "Type your question in the next cell and then type **Control-Alt Enter** to get a response. (Command-return on a Mac.)\n" +
+  "\n" +
+  "A horizonal rule in a Markdown cell indicates the start of a chat. Anything above it won't be seen by the bot.\n" +
+  "\n" +
+  "---";
+
 async function createUntitledNotebook(): Promise<boolean> {
-  const cells = [
+  const cells = [instructions, ""].map((text) =>
     new vscode.NotebookCellData(
       vscode.NotebookCellKind.Markup,
-      "Type your question in the next cell and then type **Control-Alt Enter** to get a response. (Command-return on a Mac.)\n" +
-        "\n" +
-        "A horizonal rule in a Markdown cell indicates the start of a chat. Anything above it won't be seen by the bot.\n" +
-        "\n" +
-        "---\n",
+      text,
       "markdown",
-    ),
-    new vscode.NotebookCellData(
-      vscode.NotebookCellKind.Markup,
-      "",
-      "markdown",
-    ),
-  ];
-  cells[0].metadata = {};
-  cells[1].metadata = {};
+    )
+  );
+  // cells.forEach((cell) => cell.metadata = {});
   const data = new vscode.NotebookData(cells);
 
   /* eslint-disable @typescript-eslint/naming-convention */
