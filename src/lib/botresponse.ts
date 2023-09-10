@@ -166,6 +166,9 @@ export class BotResponse {
       !await this.#stream.startsWith("```python\n")
     ) {
       await output.startMarkdownCell();
+      if (!await this.copyOrAddCue(output)) {
+        return false;
+      }
     }
     return true;
   }

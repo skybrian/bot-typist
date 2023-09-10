@@ -340,16 +340,22 @@ describe("BotResponse", () => {
       anyCellText.filter((s) => !s.match(/^[a-zA-Z0-9]+: /)),
     );
 
-    const anyMarkdownParse = anyMarkdownText.chain((output) => {
+    const anyMarkdownParseWithHeader = anyMarkdownText.chain((output) => {
       const cell: Cell = { lang: "markdown", text: output };
-      return anyBlankLines.map((blanks) => ({
-        input: `%markdown\n${blanks}${output}`,
-        cell,
-      }));
+
+      const inputText = output.startsWith("bot: ")
+        ? fc.constantFrom(output, output.slice(4))
+        : fc.constant(output);
+
+      const input = fc.tuple(anyBlankLines, inputText).map(([blanks, text]) =>
+        `%markdown\n${blanks}${text}`
+      );
+
+      return input.map((text) => ({ input: text, cell }));
     });
 
     it("copies a Markdown cell by itself", async () => {
-      const args = anyMarkdownParse.chain(({ input, cell }) =>
+      const args = anyMarkdownParseWithHeader.chain(({ input, cell }) =>
         anyChunksOf(fc.constant(input)).map((chunked) => ({ chunked, cell }))
       );
 
@@ -363,10 +369,37 @@ describe("BotResponse", () => {
       );
     });
 
+    const anyMarkdownParseWithoutHeader = anyMarkdownText.chain((output) => {
+      const cell: Cell = { lang: "markdown", text: output };
+
+      const inputText = output.startsWith("bot: ")
+        ? fc.constantFrom(output, output.slice(4))
+        : fc.constant(output);
+      const input = concat(anyBlankLines, inputText);
+
+      return input.map((text) => ({ input: text, cell }));
+    });
+
+    it("copies a Python cell block followed by a Markdown text (without a header)", async () => {
+      const args: fc.Arbitrary<{ input: string; cell: Cell }[]> = fc.tuple(
+        anyPythonInCodeBlock,
+        anyMarkdownParseWithoutHeader,
+      );
+
+      await fc.assert(
+        fc.asyncProperty(args, async ([cell1, cell2]) => {
+          const reader = new TestReader([cell1.input, cell2.input]);
+          const writer = new TestCellWriter();
+          expect(await new BotResponse(reader).copy(writer)).toBe(true);
+          expect(writer.cells).toEqual([cell1.cell, cell2.cell]);
+        }),
+      );
+    });
+
     it("copies a Python code block followed by a Markdown cell", async () => {
       const args: fc.Arbitrary<{ input: string; cell: Cell }[]> = fc.tuple(
         anyPythonInCodeBlock,
-        anyMarkdownParse,
+        anyMarkdownParseWithHeader,
       );
       await fc.assert(
         fc.asyncProperty(anyCellsAndChunks, async ([cells, chunks]) => {
@@ -381,8 +414,8 @@ describe("BotResponse", () => {
     const anyCellCluster: fc.Arbitrary<{ input: string; cell: Cell }[]> = fc
       .oneof(
         anyPythonWithHeader.map((s) => [s]),
-        anyMarkdownParse.map((s) => [s]),
-        fc.tuple(anyMarkdownParse, anyPythonInCodeBlock),
+        anyMarkdownParseWithHeader.map((s) => [s]),
+        fc.tuple(anyMarkdownParseWithHeader, anyPythonInCodeBlock),
       );
 
     const anyCellParses = fc.array(anyCellCluster, {
