@@ -44,12 +44,12 @@
       {
         "command": "bot-typist.insert-reply",
         "key": "ctrl+alt-enter",
-        "when": "inputFocus && notebookEditorFocused && notebookCellType == 'markup' && notebookCellEditable"
+        "when": "inputFocus && notebookEditorFocused"
       },
       {
         "command": "bot-typist.insert-reply",
         "key": "cmd-enter",
-        "when": "inputFocus && notebookEditorFocused && notebookCellType == 'markup' && notebookCellEditable"
+        "when": "inputFocus && notebookEditorFocused"
       }
     ]
   },
