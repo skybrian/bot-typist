@@ -102,3 +102,55 @@ export function waitForEditor(
     }, timeout);
   });
 }
+
+export function decorateWhileEmpty(
+  editor: vscode.TextEditor,
+  placeholderText: string,
+) {
+  const disposables = [] as vscode.Disposable[];
+
+  const cleanup = () => {
+    for (const d of disposables) {
+      d.dispose();
+    }
+  };
+
+  const placeholder = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true,
+    after: {
+      contentText: placeholderText,
+      color: "rgba(180,180,220,0.5)",
+      fontStyle: "italic",
+    },
+  });
+  disposables.push(placeholder);
+
+  let decorated = false;
+  const renderDecoration = (doc: vscode.TextDocument) => {
+    if (doc !== editor.document) {
+      return;
+    }
+    if (editor.document.getText().length === 0) {
+      if (!decorated) {
+        const zero = editor.document.positionAt(0);
+        editor.setDecorations(placeholder, [new vscode.Range(zero, zero)]);
+        decorated = true;
+      }
+    } else {
+      editor.setDecorations(placeholder, []);
+      decorated = false;
+    }
+  };
+
+  renderDecoration(editor.document);
+
+  disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
+    renderDecoration(e.document);
+  }));
+
+  disposables.push(vscode.workspace.onDidCloseTextDocument((doc) => {
+    if (doc === editor.document) {
+      cleanup();
+    }
+  }));
+}

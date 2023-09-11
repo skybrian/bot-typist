@@ -1,8 +1,14 @@
 import * as vscode from "vscode";
 
-import { Cell, CellOutput } from "./botrequest";
+import { Cell, CellOutput, chooseBotPrompt } from "./botrequest";
 import { CellWriter } from "./botresponse";
 import { typeText, waitForEditor } from "./editors";
+
+export function choosePrompt(cell: vscode.NotebookCell): string {
+  const notebook = cell.notebook;
+  const cellAt = (index: number) => convertCell(notebook.cellAt(index));
+  return chooseBotPrompt(cellAt, cell.index);
+}
 
 export function getActiveCell(): vscode.NotebookCell | undefined {
   const ed = vscode.window.activeNotebookEditor;

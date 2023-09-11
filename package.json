@@ -2,16 +2,13 @@
   "name": "bot-typist",
   "publisher": "skybrian",
   "displayName": "Bot Typist",
-  "description": "Chat with GPT4 in any text file",
-  "version": "0.0.1",
+  "description": "Chat with an AI bot in a Jupyter notebook",
+  "version": "0.1.0",
   "engines": {
-    "vscode": "^1.81.0"
+    "vscode": "^1.82.0"
   },
   "categories": [
     "Other"
-  ],
-  "activationEvents": [
-    "onLanguage:markdown"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -28,16 +25,18 @@
     },
     "commands": [
       {
-        "command": "bot-typist.create-untitled-notebook",
-        "title": "Create: New Jupyter Notebook (for chat)"
+        "command": "bot-typist.create-jupyter-notebook",
+        "title": "New Jupyter Notebook (for chat)",
+        "category": "Create"
       },
       {
         "command": "bot-typist.insert-reply",
-        "title": "Bot: Insert Reply"
+        "title": "Insert Bot Reply"
       },
       {
         "command": "bot-typist.show-prompt",
-        "title": "Bot: Show Prompt"
+        "title": "Show Bot Prompt",
+        "category": "Developer"
       }
     ],
     "keybindings": [

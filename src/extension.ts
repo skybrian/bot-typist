@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 import {
-  convertCell,
+  choosePrompt,
   editCell,
   getActiveCell,
   NotebookWriter,
@@ -9,176 +9,40 @@ import {
 
 import { BotResponse } from "./lib/botresponse";
 import { ChildPipe } from "./lib/processes";
-import { readAll, Reader } from "./lib/streams";
-import { chooseBotPrompt, chooseSystemPrompt } from "./lib/botrequest";
+import { Reader } from "./lib/streams";
+import { chooseSystemPrompt } from "./lib/botrequest";
+import { decorateWhileEmpty } from "./lib/editors";
+import * as llm from "./lib/llm";
 
-function getCommandPath() {
-  return vscode.workspace.getConfiguration("bot-typist").get<string>(
-    "llm.path",
-  );
+export function activate(context: vscode.ExtensionContext) {
+  const push = context.subscriptions.push.bind(context.subscriptions);
+
+  push(vscode.commands.registerCommand(
+    "bot-typist.create-jupyter-notebook",
+    createJupyterNotebookForChat,
+  ));
+
+  push(vscode.commands.registerCommand(
+    "bot-typist.insert-reply",
+    insertBotReply,
+  ));
+  push(vscode.commands.registerCommand(
+    "bot-typist.show-prompt",
+    showBotPrompt,
+  ));
 }
 
-enum ConfigState {
-  unconfigured,
-  commandNotFound,
-  commandTimedOut,
-  commandDidntRun,
-  ok,
-}
-
-/** Determines whether the llm command works. */
-async function checkCommandPath(
-  path: string | undefined,
-): Promise<ConfigState> {
-  if (path === undefined) {
-    return ConfigState.unconfigured;
-  }
-
-  let child: ChildPipe<string> | undefined;
-  try {
-    child = new ChildPipe(path, ["--version"], readAll);
-  } catch (e) {
-    console.log(`llm error: ${e}`);
-    return ConfigState.commandNotFound;
-  }
-
-  const TIMEOUT = Symbol("timeout");
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(TIMEOUT), 2000)
-  );
-
-  try {
-    const first = await Promise.race([child.close(), timeout]) as
-      | string
-      | typeof TIMEOUT;
-
-    if (first === TIMEOUT) {
-      child.kill();
-      return ConfigState.commandTimedOut;
-    }
-
-    if (!first.startsWith("llm, version ")) {
-      console.log(`llm --version output: ${first}`);
-    }
-    return ConfigState.ok;
-  } catch (e) {
-    console.log(`llm error: ${e}`);
-    return ConfigState.commandDidntRun;
-  }
-}
-
-function showConfigError(msg: string) {
-  vscode.window.showErrorMessage(msg, "Open Settings").then((choice) => {
-    if (choice === "Open Settings") {
-      vscode.commands.executeCommand(
-        "workbench.action.openSettings",
-        "bot-typist.llm.path",
-      );
-    }
-  });
-}
-
-/**
- * Returns the position of the start of the prompt to send to the llm tool.
- * If there is a <blockquote> element, it returns the start of the line after that.
- * Otherwise, it returns the first line of the document.
- * @param ed The editor to search.
- * @param endLine The line number after the last line of the prompt.
- */
-function choosePromptStart(
-  ed: vscode.TextEditor,
-  endLine: number,
-): vscode.Position {
-  for (let i = endLine - 1; i >= 0; i--) {
-    const line = ed.document.lineAt(i);
-    if (line.text.trim() === "<blockquote>") {
-      return line.range.start.translate(1);
-    }
-  }
-  return new vscode.Position(0, 0);
-}
-
-function choosePrompt(): string | undefined {
-  const activeCell = getActiveCell();
-  if (activeCell) {
-    const notebook = activeCell.notebook;
-    const cellAt = (index: number) => convertCell(notebook.cellAt(index));
-    return chooseBotPrompt(cellAt, activeCell.index);
-  }
-
-  const ed = vscode.window.activeTextEditor;
-  if (!ed) {
-    return undefined;
-  }
-
-  const promptStart = choosePromptStart(ed, ed.selection.active.line);
-  console.log(`prompt start: ${ed.document.lineAt(promptStart.line).text}`);
-  const promptRange = new vscode.Range(promptStart, ed.selection.active);
-  const prompt = ed.document.getText(promptRange);
-  return prompt;
-}
-
-function decorateWhileEmpty(
-  editor: vscode.TextEditor,
-  placeholderText: string,
-) {
-  const disposables = [] as vscode.Disposable[];
-
-  const cleanup = () => {
-    for (const d of disposables) {
-      d.dispose();
-    }
-  };
-
-  const placeholder = vscode.window.createTextEditorDecorationType({
-    isWholeLine: true,
-    after: {
-      contentText: placeholderText,
-      color: "rgba(180,180,220,0.5)",
-      fontStyle: "italic",
-    },
-  });
-  disposables.push(placeholder);
-
-  let decorated = false;
-  const renderDecoration = (doc: vscode.TextDocument) => {
-    if (doc !== editor.document) {
-      return;
-    }
-    if (editor.document.getText().length === 0) {
-      if (!decorated) {
-        const zero = editor.document.positionAt(0);
-        editor.setDecorations(placeholder, [new vscode.Range(zero, zero)]);
-        decorated = true;
-      }
-    } else {
-      editor.setDecorations(placeholder, []);
-      decorated = false;
-    }
-  };
-
-  renderDecoration(editor.document);
-
-  disposables.push(vscode.workspace.onDidChangeTextDocument((e) => {
-    renderDecoration(e.document);
-  }));
-
-  disposables.push(vscode.workspace.onDidCloseTextDocument((doc) => {
-    if (doc === editor.document) {
-      cleanup();
-    }
-  }));
-}
+export function deactivate() {}
 
 const instructions = "# AI Chat Dialog\n" +
   "\n" +
-  "Type your question in the next cell and then type **Control-Alt Enter** to get a response. (Command-return on a Mac.)\n" +
+  "Type your question in the next cell and then type **Control-Alt Enter** to get a response. (Command-enter on a Mac.)\n" +
   "\n" +
   "A horizonal rule in a Markdown cell indicates the start of a chat. Anything above it won't be seen by the bot.\n" +
   "\n" +
   "---";
 
-async function createUntitledNotebook(): Promise<boolean> {
+async function createJupyterNotebookForChat(): Promise<boolean> {
   const cells = [instructions, ""].map((text) =>
     new vscode.NotebookCellData(
       vscode.NotebookCellKind.Markup,
@@ -219,35 +83,44 @@ async function createUntitledNotebook(): Promise<boolean> {
 
   const ed = await editCell(doc.cellAt(1));
   if (!ed) {
-    console.log("createUntitledNotebook: couldn't edit cell");
+    console.log("createJupyterNotebookForChat: couldn't edit cell");
     return false;
   }
 
-  decorateWhileEmpty(
-    ed,
-    "Type your question here.",
-  );
+  decorateWhileEmpty(ed, "Type your question here.");
   return true;
 }
 
 /** If in a notebook cell, inserts cells below with the bot's reply. */
-async function insertReply(): Promise<boolean> {
+async function insertBotReply(): Promise<boolean> {
   let cell = getActiveCell();
   if (!cell) {
-    return false;
-  }
-
-  const prompt = choosePrompt();
-  if (!prompt) {
-    console.log("insertReply: no prompt");
-    return false;
-  }
-
-  const llmPath = getCommandPath();
-  if (!llmPath || await checkCommandPath(llmPath) !== ConfigState.ok) {
-    showConfigError(
-      `Can't run llm command. Check that bot-typist.llm.path is set correctly in settings.`,
+    vscode.window.showInformationMessage(
+      "Please select a notebook cell.",
     );
+    return false;
+  }
+
+  const prompt = choosePrompt(cell);
+  if (!prompt) {
+    vscode.window.showInformationMessage(
+      "Please type a question or choose a non-empty cell.",
+    );
+    return false;
+  }
+
+  const llmPath = llm.getCommandPath();
+  if (!llmPath || !await llm.checkCommandPath(llmPath)) {
+    const msg =
+      "Can't run the llm command. Please check that bot-typist.llm.path is set correctly in settings.";
+    vscode.window.showErrorMessage(msg, "Open Settings").then((choice) => {
+      if (choice === "Open Settings") {
+        vscode.commands.executeCommand(
+          "workbench.action.openSettings",
+          "bot-typist.llm.path",
+        );
+      }
+    });
     return false;
   }
 
@@ -256,7 +129,9 @@ async function insertReply(): Promise<boolean> {
 
     const copyResponse = async (input: Reader) => {
       if (!await new BotResponse(input, "🤖").copy(writer)) {
-        console.log("bot response cancelled");
+        vscode.window.showInformationMessage(
+          "Insert bot reply: cancelled.",
+        );
         return;
       }
       await writer.close();
@@ -272,15 +147,28 @@ async function insertReply(): Promise<boolean> {
     return true;
   } catch (e) {
     console.error(e);
+    vscode.window.showInformationMessage(
+      "Insert bot reply: unexpected error. (See debug console for details.)",
+    );
     return false;
   }
 }
 
 /** Open a new editor tab with the prompt used for the current position. */
-async function showPrompt(): Promise<boolean> {
-  const prompt = choosePrompt();
+async function showBotPrompt(): Promise<boolean> {
+  let cell = getActiveCell();
+  if (!cell) {
+    vscode.window.showInformationMessage(
+      "Can't generate prompt for bot. Please select a notebook cell.",
+    );
+    return false;
+  }
+
+  const prompt = choosePrompt(cell);
   if (!prompt) {
-    console.log("showPrompt: no prompt to show");
+    vscode.window.showInformationMessage(
+      "Can't generate prompt for bot. Please type a question.",
+    );
     return false;
   }
 
@@ -299,23 +187,3 @@ async function showPrompt(): Promise<boolean> {
   });
   return true;
 }
-
-export function activate(context: vscode.ExtensionContext) {
-  const push = context.subscriptions.push.bind(context.subscriptions);
-
-  push(vscode.commands.registerCommand(
-    "bot-typist.create-untitled-notebook",
-    createUntitledNotebook,
-  ));
-
-  push(vscode.commands.registerCommand(
-    "bot-typist.insert-reply",
-    insertReply,
-  ));
-  push(vscode.commands.registerCommand(
-    "bot-typist.show-prompt",
-    showPrompt,
-  ));
-}
-
-export function deactivate() {}
