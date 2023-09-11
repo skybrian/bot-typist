@@ -313,7 +313,9 @@ describe("BotResponse", () => {
     });
 
     const anyPythonInCodeBlock = anyCellText.chain((output) => {
-      const codeBlock = fc.constant("```python\n" + output + "```\n");
+      const codeBlock = anyWhitespace.map((space) =>
+        "```python\n" + output + "```" + space + "\n"
+      );
       const cell: Cell = { lang: "python", text: output };
       return codeBlock.map((input) => {
         return { input, cell };

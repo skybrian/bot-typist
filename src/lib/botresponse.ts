@@ -165,13 +165,22 @@ export class BotResponse {
   async copyCodeBlock(output: CellWriter): Promise<boolean> {
     await output.startCodeCell();
 
-    while (!await this.#stream.skipToken("```\n")) {
+    while (true) {
       if (this.atEnd) {
         return true;
-      }
+      } else if (await this.#stream.startsWith("```")) {
+        const line = await this.#stream.takeLine();
+        if (/^```[ \t]*\n?$/.test(line)) {
+          break; // found end of codeblock
+        }
 
-      if (!await this.#stream.copyLineTo(output)) {
-        return false;
+        if (!await output.write(line)) {
+          return false;
+        }
+      } else {
+        if (!await this.#stream.copyLineTo(output)) {
+          return false;
+        }
       }
     }
 
