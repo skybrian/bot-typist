@@ -1,10 +1,13 @@
 # Bot Typist for Visual Studio Code
 
-### Q: Yet another AI extension. What does this one do?
+
+### Q: Yet another AI tool? What does this one do?
 
 A: Bot Typist lets you chat with an AI bot, but in a Jupyter notebook that you've opened in VS Code.
 
-### Q: Why would I want to do that?
+Or to put it another way, it types things into cells that came from a bot. Bot Typist. See?
+
+### Q: Okay, why would I want that?
 
 A: If you're like me, it's because you think ChatGPT's ~~Code Interpreter~~ *Advanced Data Analysis* feature is a fun toy, but a terrible substitute for a notebook.
 
@@ -16,9 +19,9 @@ Another big improvement: instead of always being the backseat driver, you can ju
 
 A: No, and that's intentional. Since there's no sandbox, I think it's a bit too risky. Instead, you can run the cells it inserted yourself, hopefully after reading them.
 
-You can achieve a similar effect as Code Interpreter by running the cells yourself and then getting another reply from the bot. If there's an obvious error, you don't need to say anything more. Cell output including any errors will be included in the prompt. GPT4 will see it, apologize, and try to fix it. It's a little less magical, but this is what Code Interpreter is doing anyway.
+You can achieve a similar effect as Code Interpreter by running the cells yourself. If the code failed with an error, you don't need to say anything, just send it to the bot. The cell's outputs, including any errors, will be included in the prompt. GPT4 will see it, apologize, and try to fix it. It's a little less magical, but this is what Code Interpreter is doing anyway.
 
-Then you can delete the mistaken code and the apology if you like. That will conserve context window and money as the conversation gets longer.
+Then you can delete the mistaken code and the apology if you like. That will conserve context window (and money) as the conversation gets longer.
 
 Another good thing about doing it this way is that GPT4 won't read Python output and lie to you about it. Normally it's better to read it yourself. If it's surprising or confusing, you could ask questions about it, though.
 
