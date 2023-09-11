@@ -8,7 +8,6 @@ import {
 } from "./lib/notebooks";
 
 import { BotResponse } from "./lib/botresponse";
-import { ChildPipe } from "./lib/processes";
 import { Reader } from "./lib/streams";
 import { chooseSystemPrompt } from "./lib/botrequest";
 import { decorateWhileEmpty } from "./lib/editors";
@@ -93,7 +92,7 @@ async function createJupyterNotebookForChat(): Promise<boolean> {
 
 /** If in a notebook cell, inserts cells below with the bot's reply. */
 async function insertBotReply(): Promise<boolean> {
-  let cell = getActiveCell();
+  const cell = getActiveCell();
   if (!cell) {
     vscode.window.showInformationMessage(
       "Please select a notebook cell.",
@@ -109,8 +108,8 @@ async function insertBotReply(): Promise<boolean> {
     return false;
   }
 
-  const llmPath = llm.getCommandPath();
-  if (!llmPath || !await llm.checkCommandPath(llmPath)) {
+  const llmPath = await llm.checkCommandPath();
+  if (!llmPath) {
     const msg =
       "Can't run the llm command. Please check that bot-typist.llm.path is set correctly in settings.";
     vscode.window.showErrorMessage(msg, "Open Settings").then((choice) => {
@@ -124,27 +123,22 @@ async function insertBotReply(): Promise<boolean> {
     return false;
   }
 
-  try {
+  const handleBotReply = async (input: Reader) => {
     const writer = new NotebookWriter(cell);
 
-    const copyResponse = async (input: Reader) => {
-      if (!await new BotResponse(input, "🤖").copy(writer)) {
-        vscode.window.showInformationMessage(
-          "Insert bot reply: cancelled.",
-        );
-        return;
-      }
-      await writer.close();
-    };
+    const finished = await new BotResponse(input, "🤖").copy(writer);
+    if (!finished) {
+      vscode.window.showInformationMessage(
+        "Insert bot reply: cancelled.",
+      );
+      return;
+    }
 
-    const stdin = new ChildPipe(
-      llmPath,
-      ["--system", chooseSystemPrompt()],
-      copyResponse,
-    );
-    await stdin.write(prompt);
-    await stdin.close();
-    return true;
+    await writer.close();
+  };
+
+  try {
+    return await llm.run(llmPath, prompt, handleBotReply);
   } catch (e) {
     console.error(e);
     vscode.window.showInformationMessage(
@@ -185,5 +179,6 @@ async function showBotPrompt(): Promise<boolean> {
     preview: true,
     preserveFocus: true,
   });
+
   return true;
 }

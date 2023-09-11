@@ -87,6 +87,9 @@ export async function editCell(
   return await nextEditor;
 }
 
+/**
+ * A writer that inserts cells below the given cell in a notebook.
+ */
 export class NotebookWriter implements CellWriter {
   #cell: vscode.NotebookCell;
 
@@ -110,8 +113,8 @@ export class NotebookWriter implements CellWriter {
   /** True if at least one new cell was inserted. */
   #insertedCell = false;
 
-  constructor(cell: vscode.NotebookCell) {
-    this.#cell = cell;
+  constructor(startCell: vscode.NotebookCell) {
+    this.#cell = startCell;
 
     this.#disposables.push({
       dispose: () => {
@@ -123,11 +126,21 @@ export class NotebookWriter implements CellWriter {
     this.#disposables.push(this.#decorationType);
 
     const ed = this.editor;
-    if (ed) {
-      this.decorate(ed);
-    } else {
+    if (!ed) {
       this.cancel("No current editor.");
+      return;
     }
+
+    // Put '...' decoration at the end of the cell.
+    const end = ed.document.lineAt(ed.document.lineCount - 1).range.end;
+    ed.selection = new vscode.Selection(end, end);
+    this.decorate(ed);
+  }
+
+  private cancel(msg: string) {
+    console.log(`notebook editing cancelled: ${msg}`);
+    this.#cancelled = true;
+    this.cleanup();
   }
 
   private cleanup = () => {
@@ -136,12 +149,6 @@ export class NotebookWriter implements CellWriter {
     }
     this.#disposables.length = 0;
   };
-
-  private cancel(msg: string) {
-    console.log(`notebook editing cancelled: ${msg}`);
-    this.#cancelled = true;
-    this.cleanup();
-  }
 
   /** Returns the editor for the current cell, or undefined if no longer editing. */
   private get editor(): vscode.TextEditor | undefined {
