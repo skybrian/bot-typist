@@ -1,6 +1,6 @@
 import expect from "expect";
 import * as fc from "fast-check";
-import { anyChunksOf, concat } from "../lib/generators";
+import { anyChunksOf, concat } from "../lib/testinput";
 
 describe("concat", () => {
   it("concatenates arbitrary strings", async () => {

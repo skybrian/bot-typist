@@ -31,7 +31,7 @@
       },
       {
         "command": "bot-typist.insert-reply",
-        "title": "Insert Bot Reply"
+        "title": "Insert Bot Reply Below"
       },
       {
         "command": "bot-typist.show-prompt",
@@ -43,19 +43,19 @@
       {
         "command": "bot-typist.insert-reply",
         "key": "ctrl+alt-enter",
-        "when": "inputFocus && notebookEditorFocused"
+        "when": "editorFocus && notebookEditorFocused"
       },
       {
         "command": "bot-typist.insert-reply",
         "key": "cmd-enter",
-        "when": "inputFocus && notebookEditorFocused"
+        "when": "editorFocus && notebookEditorFocused"
       }
     ],
     "menus": {
       "notebook/cell/title": [
         {
           "command": "bot-typist.insert-reply",
-          "when": "inputFocus && notebookEditorFocused",
+          "when": "editorFocus && notebookEditorFocused",
           "group": "2_insert@1000"
         }
       ]

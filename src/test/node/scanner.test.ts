@@ -1,7 +1,7 @@
 import expect from "expect";
 import { inspect } from "util";
 import * as fc from "fast-check";
-import { anyChunksOf, concat, TestReader } from "../lib/generators";
+import { anyChunksOf, concat, TestReader } from "../lib/testinput";
 
 import { Scanner } from "../../lib/scanner";
 import { StringWriter } from "../../lib/streams";

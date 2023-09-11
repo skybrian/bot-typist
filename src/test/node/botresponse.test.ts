@@ -1,7 +1,7 @@
 import { sleep } from "../../lib/async";
 import expect from "expect";
 import * as fc from "fast-check";
-import { anyChunksOf, concat, TestReader } from "../lib/generators";
+import { anyChunksOf, concat, TestReader } from "../lib/testinput";
 
 import { allCellTypes, BotResponse, CellWriter } from "../../lib/botresponse";
 
