@@ -1,6 +1,7 @@
 {
   "name": "bot-typist",
   "publisher": "skybrian",
+  "repository": "github:skybrian/bot-typist",
   "displayName": "Bot Typist",
   "description": "Chat with an AI bot in a Jupyter notebook",
   "version": "0.1.0",
