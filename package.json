@@ -17,10 +17,21 @@
       "title": "Bot Typist",
       "properties": {
         "bot-typist.llm.path": {
+          "order": 1,
           "type": "string",
           "default": "llm",
           "scope": "machine-overridable",
           "markdownDescription": "Path to the 'llm' command to use. To install this command, see the [LLM Documentation](https://llm.datasette.io/en/stable/setup.html)"
+        },
+        "bot-typist.llm.options": {
+          "order": 2,
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "machine-overridable",
+          "markdownDescription": "Additional options to pass to 'llm' after the system prompt."
         }
       }
     },

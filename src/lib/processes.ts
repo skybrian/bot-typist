@@ -1,19 +1,50 @@
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 
 import { copyStream, DONE, ReadFunction, WriteCloser } from "./streams";
+import { Completer } from "./async";
+
+/** Indicates that a child process exited with a non-zero exit code. */
+export class ChildExitError extends Error {
+  readonly path: string;
+  readonly args: string[];
+  readonly exitCode: number;
+  readonly stderr: string;
+
+  constructor(path: string, args: string[], exitCode: number, stderr: string) {
+    super(
+      `child process '${
+        path.split("/")[-1]
+      }' stopped with exit code ${exitCode}`,
+    );
+    this.path = path;
+    this.args = args;
+    this.exitCode = exitCode;
+    this.stderr = stderr;
+  }
+
+  toString() {
+    return this.message;
+  }
+}
 
 /**
  * A child process that accepts writes and sends streaming output to a read function.
  */
 export class ChildPipe<T> implements WriteCloser<T> {
+  readonly #path: string;
+  readonly #args: string[];
   readonly #child: ChildProcessWithoutNullStreams;
   readonly #result: Promise<T>;
+
+  #stderr = "";
 
   /**
    * Spawns a child process and starts sending its result to a read function.
    * @param dest receives data that the child process writes to stdout.
    */
   constructor(path: string, args: string[], dest: ReadFunction<T>) {
+    this.#path = path;
+    this.#args = args;
     this.#child = spawn(path, args);
 
     this.#result = copyStream(this.#child.stdout, dest);
@@ -25,6 +56,7 @@ export class ChildPipe<T> implements WriteCloser<T> {
           return;
         }
         console.log("ChildPipe stderr:", chunk);
+        this.#stderr += chunk;
       }
     });
 
@@ -39,32 +71,35 @@ export class ChildPipe<T> implements WriteCloser<T> {
     this.#child.on("exit", (code, signal) => {
       if (signal) {
         this.#stop(`process exited with signal ${signal}`);
-      } else if (code !== 0) {
-        this.#stop(`process exited with exit code ${code}`);
+      } else if (code !== null && code !== 0) {
+        this.#throwExitError(code);
       }
     });
 
     this.#child.on("close", (code, signal) => {
       if (signal) {
         this.#stop(`process closed with signal ${signal}`);
-      } else {
-        const reason = code === 0
-          ? undefined
-          : `process closed with exit code ${code}`;
-        this.#stop(reason);
+      } else if (code !== null && code !== 0) {
+        this.#throwExitError(code);
       }
+      this.#stop();
     });
   }
 
   #stopCalled = false;
-  #stopError: unknown;
+  #stopError = new Completer<unknown>();
+
+  #throwExitError(code: number) {
+    const err = new ChildExitError(this.#path, this.#args, code, this.#stderr);
+    return this.#stop(undefined, err);
+  }
 
   async #stop(reason?: string, error?: unknown): Promise<void> {
     if (this.#stopCalled) {
       return;
     }
     this.#stopCalled = true;
-    this.#stopError = error;
+    this.#stopError.resolve(error);
     this.#child.kill();
 
     if (reason && error) {
@@ -112,9 +147,12 @@ export class ChildPipe<T> implements WriteCloser<T> {
     this.#child.stdin.end();
     try {
       const result = await this.#result;
-      if (this.#stopError) {
-        throw this.#stopError;
+
+      const err = await this.#stopError.promise;
+      if (err) {
+        throw err;
       }
+
       return result;
     } finally {
       this.#stop();

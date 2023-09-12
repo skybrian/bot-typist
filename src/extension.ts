@@ -12,9 +12,18 @@ import { Reader } from "./lib/streams";
 import { chooseSystemPrompt } from "./lib/botrequest";
 import { decorateWhileEmpty } from "./lib/editors";
 import * as llm from "./lib/llm";
+import { ChildExitError } from "./lib/processes";
 
 export function activate(context: vscode.ExtensionContext) {
   const push = context.subscriptions.push.bind(context.subscriptions);
+
+  let output: vscode.OutputChannel | undefined;
+  const getOutput = () => {
+    if (!output) {
+      output = vscode.window.createOutputChannel("Bot Typist");
+    }
+    return output;
+  };
 
   push(vscode.commands.registerCommand(
     "bot-typist.create-jupyter-notebook",
@@ -23,7 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   push(vscode.commands.registerCommand(
     "bot-typist.insert-reply",
-    insertBotReply,
+    () => insertBotReply(getOutput),
   ));
   push(vscode.commands.registerCommand(
     "bot-typist.show-prompt",
@@ -91,7 +100,9 @@ async function createJupyterNotebookForChat(): Promise<boolean> {
 }
 
 /** If in a notebook cell, inserts cells below with the bot's reply. */
-async function insertBotReply(): Promise<boolean> {
+async function insertBotReply(
+  output: () => vscode.OutputChannel,
+): Promise<boolean> {
   const cell = getActiveCell();
   if (!cell) {
     vscode.window.showInformationMessage(
@@ -111,15 +122,8 @@ async function insertBotReply(): Promise<boolean> {
   const llmPath = await llm.checkCommandPath();
   if (!llmPath) {
     const msg =
-      "Can't run the llm command. Please check that bot-typist.llm.path is set correctly in settings.";
-    vscode.window.showErrorMessage(msg, "Open Settings").then((choice) => {
-      if (choice === "Open Settings") {
-        vscode.commands.executeCommand(
-          "workbench.action.openSettings",
-          "bot-typist.llm.path",
-        );
-      }
-    });
+      "Can't run the llm command. Please check that its path is set correctly in settings.";
+    showSettingsError(msg, "bot-typist.llm");
     return false;
   }
 
@@ -138,14 +142,36 @@ async function insertBotReply(): Promise<boolean> {
   };
 
   try {
-    return await llm.run(llmPath, prompt, handleBotReply);
+    return await llm.run(llmPath, prompt, handleBotReply, output);
   } catch (e) {
-    console.error(e);
-    vscode.window.showInformationMessage(
-      "Insert bot reply: unexpected error. (See debug console for details.)",
-    );
+    if (e instanceof ChildExitError) {
+      if (e.stderr.includes("Usage: llm") && llm.optionsChangedFromDefault()) {
+        const msg =
+          "The llm command exited with a usage error. (See output.) Are the options set correctly?";
+        showSettingsError(msg, "bot-typist.llm");
+      } else {
+        const msg =
+          `The llm command stopped with exit code ${e.exitCode}. Check output for details.`;
+        showSettingsError(msg, "bot-typist.llm");
+      }
+    } else {
+      vscode.window.showInformationMessage(
+        `Unexpected error while running llm command: ${e}`,
+      );
+    }
     return false;
   }
+}
+
+function showSettingsError(msg: string, settingsSearch: string) {
+  vscode.window.showErrorMessage(msg, "Open Settings").then((choice) => {
+    if (choice === "Open Settings") {
+      vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        settingsSearch,
+      );
+    }
+  });
 }
 
 /** Open a new editor tab with the prompt used for the current position. */

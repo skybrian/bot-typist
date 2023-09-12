@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 
-import { ChildPipe } from "./processes";
+import { ChildExitError, ChildPipe } from "./processes";
 import { readAll, Reader } from "./streams";
 import { chooseSystemPrompt } from "./botrequest";
 
@@ -59,13 +59,42 @@ export async function run(
   llmPath: string,
   prompt: string,
   handler: (input: Reader) => Promise<void>,
+  output: () => vscode.OutputChannel,
 ) {
-  const stdin = new ChildPipe(
-    llmPath,
-    ["--system", chooseSystemPrompt()],
-    handler,
+  const extraOptions = readOptions();
+  const options = ["--system", chooseSystemPrompt()];
+  options.push(...extraOptions);
+
+  const out = output();
+  out.clear();
+  out.appendLine(
+    `${llmPath} --system $systemPrompt ${extraOptions.join(" ")}\n`,
   );
+
+  const stdin = new ChildPipe(llmPath, options, handler);
   await stdin.write(prompt);
-  await stdin.close();
+  try {
+    await stdin.close();
+  } catch (e) {
+    if (e instanceof ChildExitError && e.stderr !== "") {
+      out.appendLine(e.stderr);
+      out.show();
+    } else {
+      out.appendLine(`Unexpected error: ${e}`);
+    }
+    throw e;
+  }
   return true;
+}
+
+export function optionsChangedFromDefault(): boolean {
+  return JSON.stringify(readOptions()) !== JSON.stringify(defaultOptions);
+}
+
+const defaultOptions: string[] = [];
+
+function readOptions(): string[] {
+  return vscode.workspace.getConfiguration("bot-typist").get<string[]>(
+    "llm.options",
+  ) ?? defaultOptions;
 }
