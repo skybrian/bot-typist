@@ -37,11 +37,11 @@ export interface WriteCloser<T> extends Writer {
   close(): Promise<T>;
 }
 
-/** An async function that reads from a stream (such as a parser). */
-export type ReadFunction<T> = (input: Reader) => Promise<T>;
+/** An async function that reads from a stream. */
+export type ReadHandler<T> = (input: Reader) => Promise<T>;
 
-/** Reads an entire stream into a string. */
-export const readAll: ReadFunction<string> = async (
+/** A handler that reads the entire stream into a string. */
+export const readAll: ReadHandler<string> = async (
   r: Reader,
 ): Promise<string> => {
   let output = "";
@@ -55,20 +55,20 @@ export const readAll: ReadFunction<string> = async (
 };
 
 /**
- * Copies a stream to an async function. Completes when the function does.
+ * Copies a stream to a handler function.
  *
- * The function doesn't have to read the entire stream before returning.
- * The Readable will be destroyed whenever the function exits.
+ * When the handler resolves or rejects, the Readable will be destroyed.
+ * The handler doesn't have to read the entire stream before returning.
  *
  * If the stream emits an error, the next read() call will throw. The error
  * will be ignored if the function never calls read() again.
  *
- * @return the result of the task.
- * @throws if the ReadFunction throws.
+ * @returns the result from the handler.
+ * @throws whatever the handler throws.
  */
 export async function copyStream<T>(
   source: Readable,
-  dest: ReadFunction<T>,
+  handler: ReadHandler<T>,
 ): Promise<T> {
   let currentRead: Completer<ReadResult> | null = null;
 
@@ -133,7 +133,7 @@ export async function copyStream<T>(
   };
 
   try {
-    return await dest(adapter);
+    return await handler(adapter);
   } finally {
     source.removeListener("readable", onReadable);
     source.removeListener("end", onEnd);

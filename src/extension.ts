@@ -135,10 +135,10 @@ async function insertBotReply(
       vscode.window.showInformationMessage(
         "Insert bot reply: cancelled.",
       );
-      return;
+      return false;
     }
 
-    await writer.close();
+    return await writer.close();
   };
 
   try {

@@ -1,6 +1,6 @@
 import * as assert from "assert";
 import { ChildPipe } from "../../lib/processes";
-import { readAll } from "../../lib/streams";
+import { readAll, Reader } from "../../lib/streams";
 
 describe("ChildPipe", () => {
   describe("using echo", () => {
@@ -12,6 +12,11 @@ describe("ChildPipe", () => {
     it("writes the command's output to stdout", async () => {
       const stdout = await new ChildPipe("echo", ["hello!"], readAll).close();
       assert.strictEqual("hello!\n", stdout);
+    });
+
+    it("throws an exception if an attempt is made to write to stdin", async () => {
+      const stdin = new ChildPipe("echo", [], readAll);
+      assert.rejects(() => stdin.write("hello!"));
     });
   });
 
@@ -29,12 +34,27 @@ describe("ChildPipe", () => {
     });
 
     it("throws an exception for invalid usage", async () => {
-      const stdin = await new ChildPipe("cat", ["-+"], readAll);
       const expectedError = {
         name: "ChildProcessError",
         message: "process exited with exit code 1",
         stderr: /usage: cat/,
       };
+
+      const stdin = new ChildPipe("cat", ["-+"], readAll);
+      assert.rejects(stdin.close(), expectedError);
+    });
+
+    it("throws whatever exception the handler threw", async () => {
+      const handler = async (_: Reader) => {
+        throw new Error("cancelled");
+      };
+
+      const expectedError = {
+        name: "Error",
+        message: "cancelled",
+      };
+
+      const stdin = new ChildPipe("cat", [], handler);
       assert.rejects(stdin.close(), expectedError);
     });
   });

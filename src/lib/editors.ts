@@ -61,7 +61,7 @@ function replaceControlChars(
   replacement: string = "\uFFFD",
 ): string {
   return input.replace(
-    /[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u2028]/g,
+    /[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u2028\u2029]/g,
     replacement,
   );
 }

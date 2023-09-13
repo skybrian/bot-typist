@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 
 import { ChildExitError, ChildPipe } from "./processes";
-import { readAll, Reader } from "./streams";
+import { readAll, ReadHandler } from "./streams";
 import { chooseSystemPrompt } from "./botrequest";
 
 /**
@@ -52,29 +52,38 @@ export async function checkCommandPath(): Promise<string> {
   }
 }
 
+export interface OutputChannel {
+  clear(): void;
+  appendLine(value: string): void;
+  show(): void;
+}
+
 /**
  * Runs the llm command with the given prompt, sending the bot's response to a handler.
  */
-export async function run(
+export async function run<T>(
   llmPath: string,
   prompt: string,
-  handler: (input: Reader) => Promise<void>,
-  output: () => vscode.OutputChannel,
-) {
-  const extraOptions = readOptions();
-  const options = ["--system", chooseSystemPrompt()];
-  options.push(...extraOptions);
+  handler: ReadHandler<T>,
+  output: () => OutputChannel,
+  options = {
+    systemPrompt: chooseSystemPrompt,
+    extraOptions: readOptions,
+  },
+): Promise<T> {
+  const extra = options.extraOptions();
 
   const out = output();
   out.clear();
   out.appendLine(
-    `${llmPath} --system $systemPrompt ${extraOptions.join(" ")}\n`,
+    `${llmPath} --system $systemPrompt ${extra.join(" ")}\n`,
   );
 
-  const stdin = new ChildPipe(llmPath, options, handler);
+  const flags = ["--system", options.systemPrompt()].concat(extra);
+  const stdin = new ChildPipe(llmPath, flags, handler);
   await stdin.write(prompt);
   try {
-    await stdin.close();
+    return await stdin.close();
   } catch (e) {
     if (e instanceof ChildExitError && e.stderr !== "") {
       out.appendLine(e.stderr);
@@ -84,7 +93,6 @@ export async function run(
     }
     throw e;
   }
-  return true;
 }
 
 export function optionsChangedFromDefault(): boolean {

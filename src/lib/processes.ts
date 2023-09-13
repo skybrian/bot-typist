@@ -1,6 +1,6 @@
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 
-import { copyStream, DONE, ReadFunction, WriteCloser } from "./streams";
+import { copyStream, DONE, ReadHandler, WriteCloser } from "./streams";
 import { Completer } from "./async";
 
 /** Indicates that a child process exited with a non-zero exit code. */
@@ -28,26 +28,29 @@ export class ChildExitError extends Error {
 }
 
 /**
- * A child process that accepts writes and sends streaming output to a read function.
+ * A pipeline that streams data through a child process to a handler function.
  */
 export class ChildPipe<T> implements WriteCloser<T> {
   readonly #path: string;
   readonly #args: string[];
   readonly #child: ChildProcessWithoutNullStreams;
-  readonly #result: Promise<T>;
+  readonly #handlerResult: Promise<T>;
 
   #stderr = "";
 
   /**
-   * Spawns a child process and starts sending its result to a read function.
-   * @param dest receives data that the child process writes to stdout.
+   * Spawns a child process, sending stdout to a handler.
+   *
+   * @param handler an async function that will be called with stdout of the child process.
+   * When the handler resolves or rejects, stdout will be closed.
+   *
+   * @see close to get the handler's result.
    */
-  constructor(path: string, args: string[], dest: ReadFunction<T>) {
+  constructor(path: string, args: string[], handler: ReadHandler<T>) {
     this.#path = path;
     this.#args = args;
     this.#child = spawn(path, args);
-
-    this.#result = copyStream(this.#child.stdout, dest);
+    this.#handlerResult = copyStream(this.#child.stdout, handler);
 
     copyStream(this.#child.stderr, async (r) => {
       while (true) {
@@ -87,7 +90,7 @@ export class ChildPipe<T> implements WriteCloser<T> {
   }
 
   #stopCalled = false;
-  #stopError = new Completer<unknown>();
+  #stopped = new Completer<void>();
 
   #throwExitError(code: number) {
     const err = new ChildExitError(this.#path, this.#args, code, this.#stderr);
@@ -99,7 +102,11 @@ export class ChildPipe<T> implements WriteCloser<T> {
       return;
     }
     this.#stopCalled = true;
-    this.#stopError.resolve(error);
+    if (error) {
+      this.#stopped.reject(error);
+    } else {
+      this.#stopped.resolve();
+    }
     this.#child.kill();
 
     if (reason && error) {
@@ -139,24 +146,23 @@ export class ChildPipe<T> implements WriteCloser<T> {
   }
 
   /**
-   * Closes standard input of the child process and waits for the read function to return a value.
+   * Closes stdin of the child process and waits for pipeline to shut down.
    *
-   * @returns the result from the read function.
+   * The pipeline shuts down successfully if the handler returns a value and the process exits with a zero exit code.
+   * Otherwise, an exception will be thrown.
+   *
+   * @returns whatever the handler returned.
+   * @throws whatever the handler threw.
+   * @throws ChildExitError if handler didn't throw and the child process exited with a non-zero exit code.
    */
   async close(): Promise<T> {
     this.#child.stdin.end();
-    try {
-      const result = await this.#result;
 
-      const err = await this.#stopError.promise;
-      if (err) {
-        throw err;
-      }
+    // await the handler first, so that its exception takes priority.
+    const result = await this.#handlerResult;
+    await this.#stopped.promise;
 
-      return result;
-    } finally {
-      this.#stop();
-    }
+    return result;
   }
 
   /**

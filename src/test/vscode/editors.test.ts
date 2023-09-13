@@ -24,7 +24,8 @@ describe("typeText", function () {
     charRange(0xb, 0x1f),
     charRange(0x7f, 0x9f),
     [
-      "\u2028",
+      "\u2028", // line separator
+      "\u2029", // paragraph separator
     ],
   ].flat();
 
