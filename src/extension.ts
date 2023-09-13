@@ -9,7 +9,6 @@ import {
 
 import { BotResponse } from "./lib/botresponse";
 import { Reader } from "./lib/streams";
-import { chooseSystemPrompt } from "./lib/botrequest";
 import { decorateWhileEmpty } from "./lib/editors";
 import * as llm from "./lib/llm";
 import { ChildExitError } from "./lib/processes";
@@ -145,9 +144,11 @@ async function insertBotReply(
     return await llm.run(llmPath, prompt, handleBotReply, output);
   } catch (e) {
     if (e instanceof ChildExitError) {
-      if (e.stderr.includes("Usage: llm") && llm.optionsChangedFromDefault()) {
+      if (
+        e.stderr.includes("Usage: llm") && llm.extraArgsChangedFromDefault()
+      ) {
         const msg =
-          "The llm command exited with a usage error. (See output.) Are the options set correctly?";
+          "The llm command exited with a usage error. (See output.) Perhaps it's the extra arguments setting?";
         showSettingsError(msg, "bot-typist.llm");
       } else {
         const msg =
@@ -192,7 +193,7 @@ async function showBotPrompt(): Promise<boolean> {
     return false;
   }
 
-  const system = chooseSystemPrompt();
+  const system = llm.getConfig().systemPrompt;
   const content = `System Prompt\n---\n${system}\nUser Prompt\n---\n${prompt}`;
 
   const doc = await vscode.workspace.openTextDocument({

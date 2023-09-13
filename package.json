@@ -23,15 +23,22 @@
           "scope": "machine-overridable",
           "markdownDescription": "Path to the 'llm' command to use. To install this command, see the [LLM Documentation](https://llm.datasette.io/en/stable/setup.html)"
         },
-        "bot-typist.llm.options": {
+        "bot-typist.llm.systemPrompt": {
           "order": 2,
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "If set, overrides the system prompt sent to llm."
+        },
+        "bot-typist.llm.extraArguments": {
+          "order": 3,
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
           "scope": "machine-overridable",
-          "markdownDescription": "Additional options to pass to 'llm' after the system prompt."
+          "markdownDescription": "Additional arguments to pass to 'llm' after the system prompt. (For example, to set the model.)"
         }
       }
     },

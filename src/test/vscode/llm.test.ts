@@ -21,17 +21,17 @@ class TestChannel implements llm.OutputChannel {
 describe("llm.run", () => {
   it("sends the appropriate options to the command and the output channel", async () => {
     const testChannel = new TestChannel();
-    const options = {
-      systemPrompt: () => "You're a bot",
-      extraOptions: () => ["--asdf"],
-    };
+    const config = () => ({
+      systemPrompt: "You're a bot",
+      extraArgs: ["--asdf"],
+    });
 
     const result = await llm.run(
       "echo",
       "",
       readAll,
       () => testChannel,
-      options,
+      config,
     );
     expect(result).toEqual("--system You're a bot --asdf\n");
     expect(testChannel.log).toEqual("echo --system $systemPrompt --asdf\n\n");

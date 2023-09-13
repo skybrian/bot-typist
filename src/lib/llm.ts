@@ -2,7 +2,6 @@ import * as vscode from "vscode";
 
 import { ChildExitError, ChildPipe } from "./processes";
 import { readAll, ReadHandler } from "./streams";
-import { chooseSystemPrompt } from "./botrequest";
 
 /**
  * Reads the llm command's location and verifies that it works.
@@ -66,21 +65,18 @@ export async function run<T>(
   prompt: string,
   handler: ReadHandler<T>,
   output: () => OutputChannel,
-  options = {
-    systemPrompt: chooseSystemPrompt,
-    extraOptions: readOptions,
-  },
+  configProvider = () => getConfig(),
 ): Promise<T> {
-  const extra = options.extraOptions();
+  const config = configProvider();
 
   const out = output();
   out.clear();
   out.appendLine(
-    `${llmPath} --system $systemPrompt ${extra.join(" ")}\n`,
+    `${llmPath} --system $systemPrompt ${config.extraArgs.join(" ")}\n`,
   );
 
-  const flags = ["--system", options.systemPrompt()].concat(extra);
-  const stdin = new ChildPipe(llmPath, flags, handler);
+  const args = ["--system", config.systemPrompt].concat(config.extraArgs);
+  const stdin = new ChildPipe(llmPath, args, handler);
   await stdin.write(prompt);
   try {
     return await stdin.close();
@@ -95,14 +91,28 @@ export async function run<T>(
   }
 }
 
-export function optionsChangedFromDefault(): boolean {
-  return JSON.stringify(readOptions()) !== JSON.stringify(defaultOptions);
-}
+export const getConfig = () => {
+  const conf = vscode.workspace.getConfiguration("bot-typist");
 
-const defaultOptions: string[] = [];
+  const systemPrompt = conf.get<string>("llm.systemPrompt") ??
+    `You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.
 
-function readOptions(): string[] {
-  return vscode.workspace.getConfiguration("bot-typist").get<string[]>(
-    "llm.options",
-  ) ?? defaultOptions;
+You can see any Markdown and Python cells from the conversation so far, indicated by #markdown and #python.
+If the user executed a Python cell, each cell output will follow it, indicated by #output.
+
+You can reply using Markdown. Python code blocks should contain real Python code that will run without errors.
+They will be converted into Python cells and executed when the user chooses.
+
+To display an image, write Python code that evaluates to an image object. The image will appear as a cell output.
+
+Here is the current date and time: ${new Date()}.
+`;
+
+  const extraArgs = conf.get<string[]>("llm.extraArguments") ?? [];
+
+  return { systemPrompt, extraArgs };
+};
+
+export function extraArgsChangedFromDefault(): boolean {
+  return JSON.stringify(getConfig().extraArgs) !== JSON.stringify([]);
 }
