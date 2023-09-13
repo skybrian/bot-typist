@@ -69,7 +69,11 @@ I like to use [miniconda](https://docs.conda.io/projects/miniconda/en/latest/) a
 
 ## Settings
 
-- `bot-typist.llm.path` should be set to the full path to the 'llm' command.
+- `bot-typist.llm.path` should be set to the full path to the *llm* command.
+
+- `bot-typist.llm.systemPrompt` overrides the system prompt if set.
+
+- `bot-typist.llm.extraArguments` adds arguments to pass to *llm*. For example, you can set the model.
 
 ## Known Issues
 
@@ -79,12 +83,12 @@ I like to use [miniconda](https://docs.conda.io/projects/miniconda/en/latest/) a
 
 * There are other notebooks besides Jupyter. Adding support for them might be fun?
 
-* Bot Typist will run *llm* without the *-m* flag and get whichever model the *llm* command has configured as its default. (Yes, this should probably be a setting.) You can get a similar effect by using a separate Python environment, though.
-
-* The system prompt should be configurable.
-
 ## Release Notes
 
-### 0.1 - "It works on my machine"
+### 0.2.0 - "LLM's have lots of options"
 
-First release. Maybe the only release? Let's see if anyone likes it.
+Add settings to customize how the llm command is called.
+
+### 0.1.0 - "It works on my machine"
+
+First release. Let's see if anyone likes it.
