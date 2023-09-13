@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 
 import { ChildExitError, ChildPipe } from "./processes";
 import { readAll, ReadHandler } from "./streams";
+import { CANCELLED } from "./botresponse";
 
 /**
  * Reads the llm command's location and verifies that it works.
@@ -81,11 +82,14 @@ export async function run<T>(
   try {
     return await stdin.close();
   } catch (e) {
-    if (e instanceof ChildExitError && e.stderr !== "") {
+    if (e === CANCELLED) {
+      out.appendLine("(cancelled by user)");
+    } else if (e instanceof ChildExitError && e.stderr !== "") {
       out.appendLine(e.stderr);
       out.show();
-    } else {
+    } else if (e instanceof Error) {
       out.appendLine(`Unexpected error: ${e}`);
+      out.show();
     }
     throw e;
   }

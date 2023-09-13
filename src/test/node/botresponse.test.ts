@@ -245,7 +245,7 @@ describe("BotResponse", () => {
       const reader = new TestReader([]);
       const writer = new TestCellWriter();
       const response = new BotResponse(reader, "robot");
-      expect(await response.copy(writer)).toBe(true);
+      await response.copy(writer);
       expect(writer.cells).toEqual([{
         "lang": "markdown",
         "text": "robot: (no response)",
@@ -259,7 +259,7 @@ describe("BotResponse", () => {
       await fc.assert(fc.asyncProperty(anyNonCue, async ([text]) => {
         const reader = new TestReader([text]);
         const writer = new TestCellWriter();
-        expect(await (new BotResponse(reader).copy(writer))).toBe(true);
+        await new BotResponse(reader).copy(writer);
         expect(writer.cells).toEqual([{
           lang: "markdown",
           text: `bot: ${text}`,
@@ -280,7 +280,7 @@ describe("BotResponse", () => {
       await fc.assert(fc.asyncProperty(input, async (text) => {
         const reader = new TestReader([text]);
         const writer = new TestCellWriter();
-        expect(await (new BotResponse(reader).copy(writer))).toBe(true);
+        await new BotResponse(reader).copy(writer);
         const expected = text.trimStart();
         expect(writer.cells).toEqual([{ lang: "markdown", text: expected }]);
       }));
@@ -332,7 +332,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(args, async ({ chunked, cell }) => {
           const reader = new TestReader(chunked.chunks);
           const writer = new TestCellWriter();
-          expect(await (new BotResponse(reader).copy(writer))).toBe(true);
+          await new BotResponse(reader).copy(writer);
           expect(writer.cells).toEqual([cell]);
         }),
       );
@@ -366,7 +366,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(args, async ({ chunked, cell }) => {
           const reader = new TestReader(chunked.chunks);
           const writer = new TestCellWriter();
-          expect(await new BotResponse(reader).copy(writer)).toBe(true);
+          await new BotResponse(reader).copy(writer);
           expect(writer.cells).toEqual([cell]);
         }),
       );
@@ -393,7 +393,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(args, async ([cell1, cell2]) => {
           const reader = new TestReader([cell1.input, cell2.input]);
           const writer = new TestCellWriter();
-          expect(await new BotResponse(reader).copy(writer)).toBe(true);
+          await new BotResponse(reader).copy(writer);
           expect(writer.cells).toEqual([cell1.cell, cell2.cell]);
         }),
       );
@@ -408,7 +408,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(anyCellsAndChunks, async ([cells, chunks]) => {
           const reader = new TestReader(chunks);
           const writer = new TestCellWriter();
-          expect(await new BotResponse(reader).copy(writer)).toBe(true);
+          await new BotResponse(reader).copy(writer);
           expect(writer.cells).toEqual(cells);
         }),
       );
@@ -440,7 +440,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(anyCellsAndChunks, async ([cells, chunks]) => {
           const reader = new TestReader(chunks);
           const writer = new TestCellWriter();
-          expect(await new BotResponse(reader).copy(writer)).toBe(true);
+          await new BotResponse(reader).copy(writer);
           expect(writer.cells).toEqual(cells);
         }),
       );

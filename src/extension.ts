@@ -7,7 +7,7 @@ import {
   NotebookWriter,
 } from "./lib/notebooks";
 
-import { BotResponse } from "./lib/botresponse";
+import { BotResponse, CANCELLED } from "./lib/botresponse";
 import { Reader } from "./lib/streams";
 import { decorateWhileEmpty } from "./lib/editors";
 import * as llm from "./lib/llm";
@@ -129,21 +129,22 @@ async function insertBotReply(
   const handleBotReply = async (input: Reader) => {
     const writer = new NotebookWriter(cell);
 
-    const finished = await new BotResponse(input, "🤖").copy(writer);
-    if (!finished) {
-      vscode.window.showInformationMessage(
-        "Insert bot reply: cancelled.",
-      );
-      return false;
+    try {
+      await new BotResponse(input, "🤖").copy(writer);
+    } finally {
+      if (!await writer.close()) {
+        throw CANCELLED;
+      }
     }
-
-    return await writer.close();
   };
 
   try {
-    return await llm.run(llmPath, prompt, handleBotReply, output);
+    await llm.run(llmPath, prompt, handleBotReply, output);
+    return true;
   } catch (e) {
-    if (e instanceof ChildExitError) {
+    if (e === CANCELLED) {
+      vscode.window.showInformationMessage("Insert bot reply: cancelled");
+    } else if (e instanceof ChildExitError) {
       if (
         e.stderr.includes("Usage: llm") && llm.extraArgsChangedFromDefault()
       ) {
@@ -156,6 +157,7 @@ async function insertBotReply(
         showSettingsError(msg, "bot-typist.llm");
       }
     } else {
+      console.error(e);
       vscode.window.showInformationMessage(
         `Unexpected error while running llm command: ${e}`,
       );

@@ -159,9 +159,18 @@ export class ChildPipe<T> implements WriteCloser<T> {
     this.#child.stdin.end();
 
     // await the handler first, so that its exception takes priority.
-    const result = await this.#handlerResult;
-    await this.#stopped.promise;
+    let result: T | undefined;
+    try {
+      result = await this.#handlerResult;
+    } catch (e) {
+      // Wait for process to exit, but ignore broken pipes, etc due to cancelling.
+      try {
+        await this.#stopped.promise;
+      } catch (_ignored) {}
+      throw e;
+    }
 
+    await this.#stopped.promise;
     return result;
   }
 

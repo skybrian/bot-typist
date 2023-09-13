@@ -18,6 +18,8 @@ export interface CellWriter extends WriteCloser<boolean> {
 const cueChars =
   "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ";
 
+export const CANCELLED = Symbol("CANCELLED");
+
 export class BotResponse {
   #stream: Scanner;
   #defaultCue: string;
@@ -36,17 +38,17 @@ export class BotResponse {
    * The '%' should be followed by the cell type, e.g. '%python'.
    * Currently supports python and markdown cells.
    *
-   * @returns false if the writer cancelled the copy.
+   * @throws CANCELLED if the writer cancelled the copy.
    */
-  async copy(output: CellWriter): Promise<boolean> {
+  async copy(output: CellWriter): Promise<void> {
     // skip blank lines at start of response before checking for end
     await this.skipBlankLines();
 
     if (this.atEnd) {
       if (!await output.write(`${this.#defaultCue}: (no response)`)) {
-        return false;
+        throw CANCELLED;
       }
-      return true;
+      return;
     }
 
     let header = await this.matchHeaderLine();
@@ -54,11 +56,11 @@ export class BotResponse {
       // no header; assume markdown
       // TODO: send cell start?
       if (!await this.copyMarkdown(output)) {
-        return false;
+        throw CANCELLED;
       }
 
       if (this.atEnd) {
-        return true;
+        return;
       }
 
       header = await this.matchHeaderLine();
@@ -75,18 +77,18 @@ export class BotResponse {
         await output.startMarkdownCell();
         await this.skipBlankLines();
         if (!await this.copyMarkdown(output)) {
-          return false;
+          throw CANCELLED;
         }
       } else if (header.type === "python") {
         await output.startCodeCell();
         await this.skipBlankLines();
         if (!await this.copyPython(output)) {
-          return false;
+          throw CANCELLED;
         }
       }
 
       if (this.atEnd) {
-        return true;
+        return;
       }
 
       header = await this.matchHeaderLine();
