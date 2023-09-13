@@ -132,7 +132,7 @@ describe("BotResponse", () => {
     it("copies nothing if there's no input", async () => {
       const response = new BotResponse(new TestReader([]));
       const writer = new StringWriter();
-      expect(await response.copyPython(writer)).toBe(true);
+      await response.copyPython(writer);
       expect(writer.buffer).toBe("");
     });
 
@@ -152,7 +152,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(chunked, async ({ original, chunks }) => {
           const response = new BotResponse(new TestReader(chunks));
           const writer = new StringWriter();
-          expect(await response.copyPython(writer)).toBe(true);
+          await response.copyPython(writer);
           expect(writer.buffer).toBe(original);
         }),
       );
@@ -172,7 +172,7 @@ describe("BotResponse", () => {
         await fc.assert(fc.asyncProperty(args, async ({ original, chunks }) => {
           const response = new BotResponse(new TestReader(chunks));
           const writer = new StringWriter();
-          expect(await response.copyPython(writer)).toBe(true);
+          await response.copyPython(writer);
           expect(writer.buffer).toBe(original);
         }));
       });
@@ -192,7 +192,7 @@ describe("BotResponse", () => {
     it("writes the default cue when there's no input", async () => {
       const response = new BotResponse(new TestReader([]), "🤖 bot");
       const writer = new StringWriter();
-      expect(await response.copyOrAddCue(writer)).toBe(true);
+      await response.copyOrAddCue(writer);
       expect(writer.buffer).toBe("🤖 bot: ");
     });
 
@@ -202,7 +202,7 @@ describe("BotResponse", () => {
       await fc.assert(fc.asyncProperty(chunked, async ({ chunks }) => {
         const response = new BotResponse(new TestReader(chunks));
         const writer = new StringWriter();
-        expect(await response.copyOrAddCue(writer)).toBe(true);
+        await response.copyOrAddCue(writer);
         expect(writer.buffer).toBe("bot: ");
         expect(response.atEnd).toBe(true);
       }));
@@ -215,7 +215,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(chunked, async ({ original, chunks }) => {
           const response = new BotResponse(new TestReader(chunks));
           const writer = new StringWriter();
-          expect(await response.copyOrAddCue(writer)).toBe(true);
+          await response.copyOrAddCue(writer);
           const originalCue = original.slice(0, original.indexOf(": ") + 2);
           expect(writer.buffer).toEqual(originalCue);
         }),
@@ -231,7 +231,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(chunked, async ({ original, chunks }) => {
           const response = new BotResponse(new TestReader(chunks));
           const writer = new StringWriter();
-          expect(await response.copyOrAddCue(writer)).toBe(true);
+          await response.copyOrAddCue(writer);
           expect(writer.buffer.length).toBeGreaterThan(4);
           const expected = ("bot: " + original).slice(0, writer.buffer.length);
           expect(writer.buffer).toBe(expected);

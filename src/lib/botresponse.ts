@@ -55,9 +55,7 @@ export class BotResponse {
     if (!header) {
       // no header; assume markdown
       // TODO: send cell start?
-      if (!await this.copyMarkdown(output)) {
-        throw CANCELLED;
-      }
+      await this.copyMarkdown(output);
 
       if (this.atEnd) {
         return;
@@ -76,15 +74,11 @@ export class BotResponse {
       if (header.type === "markdown") {
         await output.startMarkdownCell();
         await this.skipBlankLines();
-        if (!await this.copyMarkdown(output)) {
-          throw CANCELLED;
-        }
+        await this.copyMarkdown(output);
       } else if (header.type === "python") {
         await output.startCodeCell();
         await this.skipBlankLines();
-        if (!await this.copyPython(output)) {
-          throw CANCELLED;
-        }
+        await this.copyPython(output);
       }
 
       if (this.atEnd) {
@@ -116,7 +110,7 @@ export class BotResponse {
     }
   }
 
-  async copyOrAddCue(output: Writer): Promise<boolean> {
+  async copyOrAddCue(output: Writer): Promise<void> {
     await this.#stream.takeMatchingPrefix(" \t");
     let name = "";
     while (true) {
@@ -134,42 +128,39 @@ export class BotResponse {
     }
     if (name && await this.#stream.skipToken(": ")) {
       // already present
-      return await output.write(name + ": ");
+      if (!await output.write(name + ": ")) {
+        throw CANCELLED;
+      }
     } else {
       // add it
-      return await output.write(this.#defaultCue + ": " + name);
+      if (!await output.write(this.#defaultCue + ": " + name)) {
+        throw CANCELLED;
+      }
     }
   }
 
-  async copyMarkdown(output: CellWriter): Promise<boolean> {
+  async copyMarkdown(output: CellWriter): Promise<void> {
     if (await this.#stream.skipToken("```python\n")) {
-      if (!await this.copyCodeBlock(output)) {
-        return false;
-      }
+      await this.copyCodeBlock(output);
     } else {
-      if (!await this.copyOrAddCue(output)) {
-        return false;
-      }
+      await this.copyOrAddCue(output);
     }
 
     while (!this.#stream.atEnd && !await this.matchHeaderLine()) {
       if (await this.#stream.skipToken("```python\n")) {
-        if (!await this.copyCodeBlock(output)) {
-          return false;
-        }
+        await this.copyCodeBlock(output);
       } else if (!await this.#stream.copyLineTo(output)) {
-        return false;
+        throw CANCELLED;
       }
     }
-    return true;
   }
 
-  async copyCodeBlock(output: CellWriter): Promise<boolean> {
+  async copyCodeBlock(output: CellWriter): Promise<void> {
     await output.startCodeCell();
 
     while (true) {
       if (this.atEnd) {
-        return true;
+        return;
       } else if (await this.#stream.startsWith("```")) {
         const line = await this.#stream.takeLine();
         if (/^```[ \t]*\n?$/.test(line)) {
@@ -177,11 +168,11 @@ export class BotResponse {
         }
 
         if (!await output.write(line)) {
-          return false;
+          throw CANCELLED;
         }
       } else {
         if (!await this.#stream.copyLineTo(output)) {
-          return false;
+          throw CANCELLED;
         }
       }
     }
@@ -192,22 +183,18 @@ export class BotResponse {
       !await this.#stream.startsWith("```python\n")
     ) {
       await output.startMarkdownCell();
-      if (!await this.copyOrAddCue(output)) {
-        return false;
-      }
+      await this.copyOrAddCue(output);
     }
-    return true;
   }
 
-  async copyPython(output: Writer): Promise<boolean> {
+  async copyPython(output: Writer): Promise<void> {
     while (!this.#stream.atEnd) {
       if (await this.matchHeaderLine()) {
-        return true;
+        return;
       }
       if (!await this.#stream.copyLineTo(output)) {
-        return false;
+        throw CANCELLED;
       }
     }
-    return true;
   }
 }
