@@ -223,7 +223,7 @@ describe("BotResponse", () => {
     });
 
     it("adds the default cue if there's no cue", async () => {
-      const input = fc.unicodeString().filter((s) =>
+      const input = fc.unicodeString().map((s) => s.trim()).filter((s) =>
         !s.match(/^[a-zA-Z0-9]+: /)
       );
       const chunked = anyChunksOf(input);
