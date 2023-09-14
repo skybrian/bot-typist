@@ -12,9 +12,12 @@ import { Reader } from "./lib/streams";
 import { decorateWhileEmpty } from "./lib/editors";
 import * as llm from "./lib/llm";
 import { ChildExitError } from "./lib/processes";
+import { extraArgsChangedFromDefault, getConfig } from "./lib/config";
 
 export function activate(context: vscode.ExtensionContext) {
   const push = context.subscriptions.push.bind(context.subscriptions);
+
+  const service = new llm.Service();
 
   let output: vscode.OutputChannel | undefined;
   const getOutput = () => {
@@ -31,7 +34,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   push(vscode.commands.registerCommand(
     "bot-typist.insert-reply",
-    () => insertBotReply(getOutput),
+    () => insertBotReply(service, getOutput),
   ));
   push(vscode.commands.registerCommand(
     "bot-typist.show-prompt",
@@ -100,6 +103,7 @@ async function createJupyterNotebookForChat(): Promise<boolean> {
 
 /** If in a notebook cell, inserts cells below with the bot's reply. */
 async function insertBotReply(
+  service: llm.Service,
   output: () => vscode.OutputChannel,
 ): Promise<boolean> {
   const cell = getActiveCell();
@@ -118,7 +122,9 @@ async function insertBotReply(
     return false;
   }
 
-  const llmPath = await llm.checkCommandPath();
+  const config = getConfig();
+
+  const llmPath = await service.checkCommandPath(config);
   if (!llmPath) {
     const msg =
       "Can't run the llm command. Please check that its path is set correctly in settings.";
@@ -139,14 +145,14 @@ async function insertBotReply(
   };
 
   try {
-    await llm.run(llmPath, prompt, handleBotReply, output);
+    await service.run(config, prompt, handleBotReply, output);
     return true;
   } catch (e) {
     if (e === CANCELLED) {
       vscode.window.showInformationMessage("Insert bot reply: cancelled");
     } else if (e instanceof ChildExitError) {
       if (
-        e.stderr.includes("Usage: llm") && llm.extraArgsChangedFromDefault()
+        e.stderr.includes("Usage: llm") && extraArgsChangedFromDefault()
       ) {
         const msg =
           "The llm command exited with a usage error. (See output.) Perhaps it's the extra arguments setting?";
@@ -195,7 +201,7 @@ async function showBotPrompt(): Promise<boolean> {
     return false;
   }
 
-  const system = llm.getConfig().systemPrompt;
+  const system = getConfig().systemPrompt;
   const content = `System Prompt\n---\n${system}\nUser Prompt\n---\n${prompt}`;
 
   const doc = await vscode.workspace.openTextDocument({
