@@ -15,13 +15,25 @@ export interface OutputChannel {
 }
 
 export class Service {
+  #config: Config;
+  #output: () => OutputChannel;
+
+  constructor(config: Config, output: () => OutputChannel) {
+    this.#config = config;
+    this.#output = output;
+  }
+
+  set config(newConfig: Config) {
+    this.#config = newConfig;
+  }
+
   /**
    * Reads the llm command's location and verifies that it works.
    *
    * @returns the path, or the empty string if it doesn't work.
    */
-  async checkCommandPath(config: { path: string }): Promise<string> {
-    const path = config.path;
+  async checkCommandPath(): Promise<string> {
+    const path = this.#config.path;
     if (path === undefined) {
       return "";
     }
@@ -63,13 +75,9 @@ export class Service {
   /**
    * Runs the llm command with the given prompt, sending the bot's response to a handler.
    */
-  async run<T>(
-    config: Config,
-    prompt: string,
-    handler: ReadHandler<T>,
-    output: () => OutputChannel,
-  ): Promise<T> {
-    const out = output();
+  async run<T>(prompt: string, handler: ReadHandler<T>): Promise<T> {
+    const config = this.#config;
+    const out = this.#output();
     out.clear();
     out.appendLine(
       `${config.path} --system $systemPrompt ${config.extraArgs.join(" ")}\n`,

@@ -17,8 +17,6 @@ import { extraArgsChangedFromDefault, getConfig } from "./lib/config";
 export function activate(context: vscode.ExtensionContext) {
   const push = context.subscriptions.push.bind(context.subscriptions);
 
-  const service = new llm.Service();
-
   let output: vscode.OutputChannel | undefined;
   const getOutput = () => {
     if (!output) {
@@ -27,6 +25,14 @@ export function activate(context: vscode.ExtensionContext) {
     return output;
   };
 
+  const service = new llm.Service(getConfig(), getOutput);
+
+  push(vscode.workspace.onDidChangeConfiguration((event) => {
+    if (event.affectsConfiguration("bot-typist.llm")) {
+      service.config = getConfig();
+    }
+  }));
+
   push(vscode.commands.registerCommand(
     "bot-typist.create-jupyter-notebook",
     createJupyterNotebookForChat,
@@ -34,7 +40,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   push(vscode.commands.registerCommand(
     "bot-typist.insert-reply",
-    () => insertBotReply(service, getOutput),
+    () => insertBotReply(service),
   ));
   push(vscode.commands.registerCommand(
     "bot-typist.show-prompt",
@@ -102,10 +108,7 @@ async function createJupyterNotebookForChat(): Promise<boolean> {
 }
 
 /** If in a notebook cell, inserts cells below with the bot's reply. */
-async function insertBotReply(
-  service: llm.Service,
-  output: () => vscode.OutputChannel,
-): Promise<boolean> {
+async function insertBotReply(service: llm.Service): Promise<boolean> {
   const cell = getActiveCell();
   if (!cell) {
     vscode.window.showInformationMessage(
@@ -124,7 +127,7 @@ async function insertBotReply(
 
   const config = getConfig();
 
-  const llmPath = await service.checkCommandPath(config);
+  const llmPath = await service.checkCommandPath();
   if (!llmPath) {
     const msg =
       "Can't run the llm command. Please check that its path is set correctly in settings.";
@@ -145,7 +148,7 @@ async function insertBotReply(
   };
 
   try {
-    await service.run(config, prompt, handleBotReply, output);
+    await service.run(prompt, handleBotReply);
     return true;
   } catch (e) {
     if (e === CANCELLED) {

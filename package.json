@@ -26,6 +26,7 @@
         "bot-typist.llm.systemPrompt": {
           "order": 2,
           "type": "string",
+          "editPresentation": "multilineText",
           "default": "",
           "scope": "machine-overridable",
           "markdownDescription": "If set, overrides the system prompt sent to llm."
