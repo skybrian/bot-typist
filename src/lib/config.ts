@@ -19,9 +19,11 @@ To display an image, write Python code that evaluates to an image object. The im
 Here is the current date and time: ${new Date()}.
 `;
 
+  const model = conf.get<string>("llm.model");
+
   const extraArgs = conf.get<string[]>("llm.extraArguments") ?? [];
 
-  return { path, systemPrompt, extraArgs };
+  return { path, model, systemPrompt, extraArgs };
 };
 
 export function extraArgsChangedFromDefault(): boolean {

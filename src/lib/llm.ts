@@ -5,6 +5,7 @@ import { CANCELLED } from "./botresponse";
 export type Config = {
   path: string;
   systemPrompt: string;
+  model: string | undefined;
   extraArgs: string[];
 };
 
@@ -80,10 +81,17 @@ export class Service {
     const out = this.#output();
     out.clear();
     out.appendLine(
-      `${config.path} --system $systemPrompt ${config.extraArgs.join(" ")}\n`,
+      `${config.path} --system $systemPrompt ${
+        config.model ? `--model ${config.model} ` : ""
+      }${config.extraArgs.join(" ")}\n`,
     );
 
-    const args = ["--system", config.systemPrompt].concat(config.extraArgs);
+    const args = ["--system", config.systemPrompt];
+    if (config.model) {
+      args.push("--model", config.model);
+    }
+    args.push(...config.extraArgs);
+
     const stdin = new ChildPipe(config.path, args, handler);
     await stdin.write(prompt);
     try {

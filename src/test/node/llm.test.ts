@@ -24,6 +24,7 @@ describe("llm.Service", () => {
       const config = {
         path: "echo",
         systemPrompt: "You're a bot",
+        model: "gpt5",
         extraArgs: ["--asdf"],
       };
 
@@ -31,14 +32,17 @@ describe("llm.Service", () => {
       const service = new llm.Service(config, () => testChannel);
 
       const result = await service.run("", readAll);
-      expect(result).toEqual("--system You're a bot --asdf\n");
-      expect(testChannel.log).toEqual("echo --system $systemPrompt --asdf\n\n");
+      expect(result).toEqual("--system You're a bot --model gpt5 --asdf\n");
+      expect(testChannel.log).toEqual(
+        "echo --system $systemPrompt --model gpt5 --asdf\n\n",
+      );
     });
 
     it("uses the new config after receiving a change", async () => {
       const config = {
         path: "echo",
         systemPrompt: "You're a bot",
+        model: "gpt6",
         extraArgs: ["--asdf"],
       };
 
@@ -48,6 +52,7 @@ describe("llm.Service", () => {
       service.config = {
         path: "echo",
         systemPrompt: "You're a bat",
+        model: undefined,
         extraArgs: ["--jkl"],
       };
 

@@ -21,25 +21,32 @@
           "type": "string",
           "default": "llm",
           "scope": "machine-overridable",
-          "markdownDescription": "Path to the 'llm' command to use. To install this command, see the [LLM Documentation](https://llm.datasette.io/en/stable/setup.html)"
+          "markdownDescription": "Path to the `llm` command to use. To install this command, see the [LLM Documentation](https://llm.datasette.io/en/stable/setup.html)"
         },
         "bot-typist.llm.systemPrompt": {
-          "order": 2,
+          "order": 3,
           "type": "string",
           "editPresentation": "multilineText",
           "default": "",
           "scope": "machine-overridable",
-          "markdownDescription": "If set, overrides the system prompt sent to llm."
+          "markdownDescription": "If set, overrides the system prompt sent to `llm`."
+        },
+        "bot-typist.llm.model": {
+          "order": 2,
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "The name of the model that the `llm` command should use. (See [LLM's usage documentation](https://llm.datasette.io/en/stable/usage.html).)"
         },
         "bot-typist.llm.extraArguments": {
-          "order": 3,
+          "order": 4,
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
           "scope": "machine-overridable",
-          "markdownDescription": "Additional arguments to pass to 'llm' after the system prompt. (For example, to set the model.)"
+          "markdownDescription": "Any additional arguments to pass to `llm`."
         }
       }
     },
