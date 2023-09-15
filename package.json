@@ -27,7 +27,7 @@
           "order": 3,
           "type": "string",
           "editPresentation": "multilineText",
-          "default": "",
+          "default": "You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.\n\nYou can see any Markdown and Python cells from the conversation so far, indicated by #markdown and #python. If the user executed a Python cell, each cell output will follow it, indicated by #output.\n\nYou can reply using Markdown. Python code blocks should contain real Python code that will run without errors. They will be converted into Python cells and executed when the user chooses.\n\nTo display an image, write Python code that evaluates to an image object. The image will appear as a cell output.",
           "scope": "machine-overridable",
           "markdownDescription": "If set, overrides the system prompt sent to `llm`."
         },

@@ -20,7 +20,38 @@ class TestChannel implements llm.OutputChannel {
 
 describe("llm.Service", () => {
   describe("run", () => {
-    it("sends the appropriate arguments to the command and the output channel", async () => {
+    it("doesn't run an empty configuation", async () => {
+      const config: llm.Config = {
+        path: "",
+        systemPrompt: "",
+        model: "",
+        extraArgs: [],
+      };
+
+      const testChannel = new TestChannel();
+      const service = new llm.Service(config, () => testChannel);
+      expect(service.run("", readAll)).rejects.toThrowError();
+    });
+
+    it("sends no arguments for an almost empty configuation", async () => {
+      const config: llm.Config = {
+        path: "echo",
+        systemPrompt: "",
+        model: "",
+        extraArgs: [],
+      };
+
+      const testChannel = new TestChannel();
+      const service = new llm.Service(config, () => testChannel);
+
+      const result = await service.run("", readAll);
+      expect(result).toEqual("\n");
+      expect(testChannel.log).toEqual(
+        "echo\n\n",
+      );
+    });
+
+    it("sends all arguments for a filled configuration", async () => {
       const config = {
         path: "echo",
         systemPrompt: "You're a bot",
@@ -34,31 +65,33 @@ describe("llm.Service", () => {
       const result = await service.run("", readAll);
       expect(result).toEqual("--system You're a bot --model gpt5 --asdf\n");
       expect(testChannel.log).toEqual(
-        "echo --system $systemPrompt --model gpt5 --asdf\n\n",
+        "systemPrompt=```\n" +
+          "You're a bot\n" +
+          "```\n" +
+          "echo --system $systemPrompt --model gpt5 --asdf\n\n",
       );
     });
 
-    it("uses the new config after receiving a change", async () => {
+    it("uses the new config after it changes", async () => {
       const config = {
         path: "echo",
-        systemPrompt: "You're a bot",
-        model: "gpt6",
-        extraArgs: ["--asdf"],
+        systemPrompt: "You're a bat",
+        model: "huh",
+        extraArgs: ["--jkl"],
       };
-
       const testChannel = new TestChannel();
       const service = new llm.Service(config, () => testChannel);
 
       service.config = {
         path: "echo",
-        systemPrompt: "You're a bat",
-        model: undefined,
-        extraArgs: ["--jkl"],
+        systemPrompt: "",
+        model: "",
+        extraArgs: [],
       };
 
       const result = await service.run("", readAll);
-      expect(result).toEqual("--system You're a bat --jkl\n");
-      expect(testChannel.log).toEqual("echo --system $systemPrompt --jkl\n\n");
+      expect(result).toEqual("\n");
+      expect(testChannel.log).toEqual("echo\n\n");
     });
   });
 });

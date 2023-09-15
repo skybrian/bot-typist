@@ -5,7 +5,7 @@ import { CANCELLED } from "./botresponse";
 export type Config = {
   path: string;
   systemPrompt: string;
-  model: string | undefined;
+  model: string;
   extraArgs: string[];
 };
 
@@ -78,19 +78,20 @@ export class Service {
    */
   async run<T>(prompt: string, handler: ReadHandler<T>): Promise<T> {
     const config = this.#config;
+
     const out = this.#output();
     out.clear();
-    out.appendLine(
-      `${config.path} --system $systemPrompt ${
-        config.model ? `--model ${config.model} ` : ""
-      }${config.extraArgs.join(" ")}\n`,
-    );
-
-    const args = ["--system", config.systemPrompt];
-    if (config.model) {
-      args.push("--model", config.model);
+    if (config.path === "") {
+      throw new Error("can't run llm command because its path isn't set");
     }
-    args.push(...config.extraArgs);
+
+    logCommand(config, out);
+
+    const systemFlag = config.systemPrompt
+      ? ["--system", config.systemPrompt]
+      : [];
+    const modelFlag = config.model ? ["--model", config.model] : [];
+    const args = systemFlag.concat(modelFlag, config.extraArgs);
 
     const stdin = new ChildPipe(config.path, args, handler);
     await stdin.write(prompt);
@@ -109,4 +110,21 @@ export class Service {
       throw e;
     }
   }
+}
+
+function logCommand(config: Config, out: OutputChannel) {
+  let line = config.path;
+  if (config.systemPrompt) {
+    out.appendLine("systemPrompt=```");
+    out.appendLine(config.systemPrompt);
+    out.appendLine("```");
+    line += " --system $systemPrompt";
+  }
+  if (config.model) {
+    line += ` --model ${config.model}`;
+  }
+  if (config.extraArgs.length > 0) {
+    line += " " + config.extraArgs.join(" ");
+  }
+  out.appendLine(line + "\n");
 }
