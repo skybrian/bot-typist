@@ -1,4 +1,4 @@
-import { Reader, WriteCloser, Writer } from "./streams";
+import { DONE, Reader, ReadResult, WriteCloser, Writer } from "./streams";
 import { Scanner } from "./scanner";
 
 export const allCellTypes = ["markdown", "python"] as const;
@@ -14,9 +14,6 @@ export interface CellWriter extends WriteCloser<boolean> {
   startCodeCell(): Promise<boolean>;
   startMarkdownCell(): Promise<boolean>;
 }
-
-const cueChars =
-  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ";
 
 export const CANCELLED = Symbol("CANCELLED");
 
@@ -112,20 +109,7 @@ export class BotResponse {
 
   async copyOrAddCue(output: Writer): Promise<void> {
     await this.#stream.takeMatchingPrefix(" \t");
-    let name = "";
-    while (true) {
-      const char = await this.#stream.takeMatchingChar(cueChars);
-      if (char) {
-        name += char;
-        continue;
-      }
-      const emoji = await this.#stream.takeEmoji();
-      if (emoji) {
-        name += emoji;
-        continue;
-      }
-      break;
-    }
+    let name = await takeLabel(this.#stream);
     if (name && await this.#stream.skipToken(": ")) {
       // already present
       if (!await output.write(name + ": ")) {
@@ -198,3 +182,46 @@ export class BotResponse {
     }
   }
 }
+
+export const checkCueLabel = async (input: string): Promise<boolean> => {
+  if (input.trim() !== input || input === "") {
+    return false;
+  }
+
+  let reads = 0;
+  const reader: Reader = {
+    read: function (): Promise<ReadResult> {
+      reads++;
+      if (reads === 1) {
+        return Promise.resolve(input);
+      } else {
+        return Promise.resolve(DONE);
+      }
+    },
+  };
+
+  const scanner = new Scanner(reader);
+  const label = await takeLabel(scanner);
+  return label === input && scanner.atEnd;
+};
+
+const labelChars =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ";
+
+const takeLabel = async (stream: Scanner): Promise<string> => {
+  let name = "";
+  while (true) {
+    const char = await stream.takeMatchingChar(labelChars);
+    if (char) {
+      name += char;
+      continue;
+    }
+    const emoji = await stream.takeEmoji();
+    if (emoji) {
+      name += emoji;
+      continue;
+    }
+    break;
+  }
+  return name;
+};

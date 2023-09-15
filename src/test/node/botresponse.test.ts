@@ -3,7 +3,12 @@ import expect from "expect";
 import * as fc from "fast-check";
 import { anyChunksOf, concat, TestReader } from "../lib/testinput";
 
-import { allCellTypes, BotResponse, CellWriter } from "../../lib/botresponse";
+import {
+  allCellTypes,
+  BotResponse,
+  CellWriter,
+  checkCueLabel,
+} from "../../lib/botresponse";
 
 import { StringWriter } from "../../lib/streams";
 
@@ -446,4 +451,18 @@ describe("BotResponse", () => {
       );
     });
   });
+});
+
+describe("checkCueLabel", () => {
+  for (const label of ["🤖", "bot", "gpt4", "0", "Ford Prefect"]) {
+    it(`returns true for '${label}'`, async () => {
+      expect(await checkCueLabel(label)).toBeTruthy();
+    });
+  }
+
+  for (const nonlabel of ["", " ", ":", " Marvin", "Marvin "]) {
+    it(`returns false for '${nonlabel}'`, async () => {
+      expect(await checkCueLabel(nonlabel)).toBeFalsy();
+    });
+  }
 });

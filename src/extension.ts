@@ -7,12 +7,12 @@ import {
   NotebookWriter,
 } from "./lib/notebooks";
 
-import { BotResponse, CANCELLED } from "./lib/botresponse";
+import { BotResponse, CANCELLED, checkCueLabel } from "./lib/botresponse";
 import { Reader } from "./lib/streams";
 import { decorateWhileEmpty } from "./lib/editors";
 import * as llm from "./lib/llm";
 import { ChildExitError } from "./lib/processes";
-import { extraArgsChangedFromDefault, getConfig } from "./lib/config";
+import { Config, extraArgsChangedFromDefault, getConfig } from "./lib/config";
 
 export function activate(context: vscode.ExtensionContext) {
   const push = context.subscriptions.push.bind(context.subscriptions);
@@ -125,8 +125,6 @@ async function insertBotReply(service: llm.Service): Promise<boolean> {
     return false;
   }
 
-  const config = getConfig();
-
   const llmPath = await service.checkCommandPath();
   if (!llmPath) {
     const msg =
@@ -135,11 +133,20 @@ async function insertBotReply(service: llm.Service): Promise<boolean> {
     return false;
   }
 
+  const cue = getConfig().cue;
+  if (!await checkCueLabel(cue)) {
+    showSettingsError(
+      "Sorry, the cue you chose isn't supported yet.",
+      "bot-typist.cue",
+    );
+    return false;
+  }
+
   const handleBotReply = async (input: Reader) => {
     const writer = new NotebookWriter(cell);
 
     try {
-      await new BotResponse(input, "🤖").copy(writer);
+      await new BotResponse(input, cue).copy(writer);
     } finally {
       if (!await writer.close()) {
         throw CANCELLED;

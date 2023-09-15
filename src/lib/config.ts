@@ -1,7 +1,11 @@
 import * as vscode from "vscode";
 import * as llm from "./llm";
 
-export const getConfig = (): llm.Config => {
+export interface Config extends llm.Config {
+  cue: string;
+}
+
+export const getConfig = (): Config => {
   const conf = vscode.workspace.getConfiguration("bot-typist");
 
   const path = conf.get<string>("llm.path")?.trim() ?? "llm";
@@ -9,7 +13,9 @@ export const getConfig = (): llm.Config => {
   const model = conf.get<string>("llm.model")?.trim() ?? "";
   const extraArgs = conf.get<string[]>("llm.extraArguments") ?? [];
 
-  return { path, model, systemPrompt, extraArgs };
+  const cue = conf.get<string>("cue")?.trim() ?? "🤖";
+
+  return { path, model, systemPrompt, extraArgs, cue };
 };
 
 export function extraArgsChangedFromDefault(): boolean {

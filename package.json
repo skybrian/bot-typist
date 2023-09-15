@@ -47,6 +47,13 @@
           "default": [],
           "scope": "machine-overridable",
           "markdownDescription": "Any additional arguments to pass to `llm`."
+        },
+        "bot-typist.cue": {
+          "order": 6,
+          "type": "string",
+          "default": "🤖",
+          "scope": "machine-overridable",
+          "markdownDescription": "A label that will automatically be added before the bot's response in each markdown cell."
         }
       }
     },
