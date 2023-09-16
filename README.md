@@ -5,25 +5,28 @@
 
 A: Bot Typist lets you chat with an AI bot, but in a Jupyter notebook that you've opened in VS Code.
 
-Or to put it another way, it types things into cells that came from a bot. Bot Typist. See?
+Or to put it another way, it types things into cells that came from a bot. *Bot Typist.* See?
 
 ### Q: Okay, why would I want that?
 
 A: If you're like me, it's because you think ChatGPT's ~~Code Interpreter~~ *Advanced Data Analysis* feature is a fun toy, but a terrible substitute for a notebook.
 
-Bot Typist lets you do almost the same thing, except that Python is running on your own machine. The chat transcript is already in your editor. The Python process doesn't get killed automatically when you're taking a break. Also, when you do restart it, you can easily re-run all the cells. You can also install whatever Python packages you like.
+Having a conversation about code in a Python notebook that's running on your own machine has a lot of advantages:
 
-Another big improvement: instead of always being the backseat driver, you can jump in and edit the code at any time. (You can edit the rest of the chat transcript, too.)
+* The Python process doesn't get killed automatically when you're taking a break.
+* If you do need to restart Python, you can re-run all the cells.
+* You can install whatever Python packages you like.
+* You can edit the chat transcript any way you like. This means you can fix mistakes that the bot makes or write code yourself. You aren't forced to always be the back seat driver.
 
 ### Q: Will Bot Typist automatically run the Python code that the bot generates?
 
-A: No, and that's intentional. Since there's no sandbox, I think it's a bit too risky. Instead, you can run the cells it inserted yourself, hopefully after reading them.
+A: No, and that's intentional. Since there's no sandbox, I think it's a bit too risky. Instead, you can run the cells yourself. (Hopefully after reading them!)
 
-But you can achieve a similar effect as Code Interpreter. If running a cell fails with an error, you don't need to say anything, just send it to the bot. The cell's outputs, including any errors, will be included in the prompt. GPT4 will see it, apologize, and try to fix it. It's a little less magical, but this is what Code Interpreter is doing anyway.
+But the result is still much like Code Interpreter. If running a cell fails with an error, you don't need to say anything, just run the command to get a bot response. The cell's outputs, including any errors, will be included in the prompt. GPT4 will see it, apologize, and try to fix it. It's a little less magical, but this is how Code Interpreter does it anyway.
 
-Then you can delete the mistaken code and the apology if you like. That will conserve context window (and money) as the conversation gets longer.
+Also, after getting corrected code, you can delete the mistaken code and the apology if you like. That will conserve context window (and money) as the conversation gets longer.
 
-Another good thing about doing it this way is that GPT4 won't normally read the Python output and lie to you about it. I find it's better to read it myself. If it's surprising or confusing, you could ask questions about it, though.
+Another problem this avoids is that when using Code Interpreter, it will often read Python output and lie to you about it, claiming that a test passed when it actually failed. I find it's better to read it myself. If you find the output surprising or confusing, you could ask questions about it, though.
 
 ### Q: Which bots can I chat with?
 
@@ -69,11 +72,22 @@ I like to use [miniconda](https://docs.conda.io/projects/miniconda/en/latest/) a
 
 ## Settings
 
+Required:
+
 - `bot-typist.llm.path` should be set to the full path to the *llm* command.
+
+Optional:
 
 - `bot-typist.llm.systemPrompt` overrides the system prompt if set.
 
-- `bot-typist.llm.extraArguments` adds arguments to pass to *llm*. For example, you can set the model.
+- `bot-typist.llm.model` sets the model. (For example, 'gpt4'.) Otherwise, it uses whatever llm's default model is.
+
+- `bot-typist.llm.stop` sets a stop sequence that controls when the bot's response should be cut off. By default, this is used
+to stop the bot if it tries to generate Python output.
+
+- `bot-typist.llm.extraArguments` adds any other arguments you like to the *llm* command.
+
+- `bot-typist.cue` lets you change the label used to indicate the bot's responses. The default is a robot emoji ('🤖').
 
 ## Known Issues
 
@@ -84,6 +98,12 @@ I like to use [miniconda](https://docs.conda.io/projects/miniconda/en/latest/) a
 * There are other notebooks besides Jupyter. Adding support for them might be fun?
 
 ## Release Notes
+
+### 0.3.0 - "Stopping is important"
+
+* If the bot tries to print Python output, cut if off there.
+* Added more settings.
+* Added a 'Bot Typist' output panel. It shows the command line sent to LLM and any errors.
 
 ### 0.2.0 - "LLM's have lots of options"
 
