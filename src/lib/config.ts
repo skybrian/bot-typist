@@ -11,11 +11,12 @@ export const getConfig = (): Config => {
   const path = conf.get<string>("llm.path")?.trim() ?? "llm";
   const systemPrompt = conf.get<string>("llm.systemPrompt")?.trim() ?? "";
   const model = conf.get<string>("llm.model")?.trim() ?? "";
+  const stop = conf.get<string>("llm.stop") ?? "";
   const extraArgs = conf.get<string[]>("llm.extraArguments") ?? [];
 
   const cue = conf.get<string>("cue")?.trim() ?? "🤖";
 
-  return { path, model, systemPrompt, extraArgs, cue };
+  return { path, model, systemPrompt, stop, extraArgs, cue };
 };
 
 export function extraArgsChangedFromDefault(): boolean {

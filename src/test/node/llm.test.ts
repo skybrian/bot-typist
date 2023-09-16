@@ -25,6 +25,7 @@ describe("llm.Service", () => {
         path: "",
         systemPrompt: "",
         model: "",
+        stop: "",
         extraArgs: [],
       };
 
@@ -38,6 +39,7 @@ describe("llm.Service", () => {
         path: "echo",
         systemPrompt: "",
         model: "",
+        stop: "",
         extraArgs: [],
       };
 
@@ -52,10 +54,11 @@ describe("llm.Service", () => {
     });
 
     it("sends all arguments for a filled configuration", async () => {
-      const config = {
+      const config: llm.Config = {
         path: "echo",
         systemPrompt: "You're a bot",
         model: "gpt5",
+        stop: "\n#done\n",
         extraArgs: ["--asdf"],
       };
 
@@ -63,20 +66,23 @@ describe("llm.Service", () => {
       const service = new llm.Service(config, () => testChannel);
 
       const result = await service.run("", readAll);
-      expect(result).toEqual("--system You're a bot --model gpt5 --asdf\n");
+      expect(result).toEqual(
+        "--system You're a bot --model gpt5 -o stop \n#done\n --asdf\n",
+      );
       expect(testChannel.log).toEqual(
         "systemPrompt=```\n" +
           "You're a bot\n" +
           "```\n" +
-          "echo --system $systemPrompt --model gpt5 --asdf\n\n",
+          "echo --system $systemPrompt --model gpt5 -o stop '\\n#done\\n' --asdf\n\n",
       );
     });
 
     it("uses the new config after it changes", async () => {
-      const config = {
+      const config: llm.Config = {
         path: "echo",
         systemPrompt: "You're a bat",
         model: "huh",
+        stop: "#eof",
         extraArgs: ["--jkl"],
       };
       const testChannel = new TestChannel();
@@ -86,6 +92,7 @@ describe("llm.Service", () => {
         path: "echo",
         systemPrompt: "",
         model: "",
+        stop: "",
         extraArgs: [],
       };
 

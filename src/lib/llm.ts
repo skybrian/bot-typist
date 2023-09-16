@@ -6,6 +6,7 @@ export type Config = {
   path: string;
   systemPrompt: string;
   model: string;
+  stop: string;
   extraArgs: string[];
 };
 
@@ -91,7 +92,8 @@ export class Service {
       ? ["--system", config.systemPrompt]
       : [];
     const modelFlag = config.model ? ["--model", config.model] : [];
-    const args = systemFlag.concat(modelFlag, config.extraArgs);
+    const stopFlag = config.stop ? ["-o", "stop", config.stop] : [];
+    const args = systemFlag.concat(modelFlag, stopFlag, config.extraArgs);
 
     const stdin = new ChildPipe(config.path, args, handler);
     await stdin.write(prompt);
@@ -123,8 +125,25 @@ function logCommand(config: Config, out: OutputChannel) {
   if (config.model) {
     line += ` --model ${config.model}`;
   }
+  if (config.stop) {
+    line += ` -o stop ${quote(config.stop)}`;
+  }
   if (config.extraArgs.length > 0) {
     line += " " + config.extraArgs.join(" ");
   }
   out.appendLine(line + "\n");
+}
+
+function quote(s: string): string {
+  if (
+    s.includes("\n") || s.includes("\\") || s.includes("'" || s.includes(" "))
+  ) {
+    s = s.replaceAll("\\", "\\\\").replaceAll("\n", "\\n").replaceAll(
+      "'",
+      "\\'",
+    );
+    return "'" + s + "'";
+  } else {
+    return s;
+  }
 }
