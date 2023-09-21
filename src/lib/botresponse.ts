@@ -1,7 +1,7 @@
 import { DONE, Reader, ReadResult, WriteCloser, Writer } from "./streams";
 import { Scanner } from "./scanner";
 
-const allLanguages = ["python", "typescript"] as const;
+export const allLanguages = ["python", "typescript"] as const;
 
 export const allCellTypes = ["markdown", ...allLanguages] as const;
 

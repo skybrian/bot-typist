@@ -1,14 +1,8 @@
 import * as vscode from "vscode";
 
 import { Cell, CellOutput, chooseBotPrompt } from "./botrequest";
-import { CellWriter } from "./botresponse";
+import { allLanguages, CellWriter } from "./botresponse";
 import { typeText, waitForEditor } from "./editors";
-
-export function choosePrompt(cell: vscode.NotebookCell): string {
-  const notebook = cell.notebook;
-  const cellAt = (index: number) => convertCell(notebook.cellAt(index));
-  return chooseBotPrompt(cellAt, cell.index);
-}
 
 export function getActiveCell(): vscode.NotebookCell | undefined {
   const ed = vscode.window.activeNotebookEditor;
@@ -22,7 +16,30 @@ export function getActiveCell(): vscode.NotebookCell | undefined {
   return ed.notebook.cellAt(sel.start);
 }
 
-const textMimeTypes = ["text/plain", "application/vnd.code.notebook.stdout"];
+export function getNotebookLanguage(cell: vscode.NotebookCell): string {
+  const notebook = cell.notebook;
+  const lang = notebook.metadata?.language_info?.name;
+  if (lang) {
+    return lang;
+  }
+
+  const langs: string[] = [...allLanguages];
+  for (let i = cell.index; i >= 0; i--) {
+    const lang = notebook.cellAt(i).document.languageId;
+    if (langs.includes(lang)) {
+      return lang;
+    }
+  }
+
+  // not found
+  return "";
+}
+
+export function choosePrompt(cell: vscode.NotebookCell): string {
+  const notebook = cell.notebook;
+  const cellAt = (index: number) => convertCell(notebook.cellAt(index));
+  return chooseBotPrompt(cellAt, cell.index);
+}
 
 export function convertCell(cell: vscode.NotebookCell): Cell {
   const doc = cell.document;
@@ -32,6 +49,8 @@ export function convertCell(cell: vscode.NotebookCell): Cell {
     outputs: cell.outputs.map(convertOutput),
   };
 }
+
+const textMimeTypes = ["text/plain", "application/vnd.code.notebook.stdout"];
 
 function convertOutput(output: vscode.NotebookCellOutput): CellOutput {
   const decoder = new TextDecoder();

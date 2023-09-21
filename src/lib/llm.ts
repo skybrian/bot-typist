@@ -17,16 +17,12 @@ export interface OutputChannel {
 }
 
 export class Service {
-  #config: Config;
-  #output: () => OutputChannel;
+  readonly #config: Config;
+  readonly #output: () => OutputChannel;
 
   constructor(config: Config, output: () => OutputChannel) {
     this.#config = config;
     this.#output = output;
-  }
-
-  set config(newConfig: Config) {
-    this.#config = newConfig;
   }
 
   /**

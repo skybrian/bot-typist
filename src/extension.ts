@@ -4,6 +4,7 @@ import {
   choosePrompt,
   editCell,
   getActiveCell,
+  getNotebookLanguage,
   NotebookWriter,
 } from "./lib/notebooks";
 
@@ -12,7 +13,7 @@ import { Reader } from "./lib/streams";
 import { decorateWhileEmpty } from "./lib/editors";
 import * as llm from "./lib/llm";
 import { ChildExitError } from "./lib/processes";
-import { Config, extraArgsChangedFromDefault, getConfig } from "./lib/config";
+import { extraArgsChangedFromDefault, getConfig } from "./lib/config";
 
 export function activate(context: vscode.ExtensionContext) {
   const push = context.subscriptions.push.bind(context.subscriptions);
@@ -25,11 +26,22 @@ export function activate(context: vscode.ExtensionContext) {
     return output;
   };
 
-  const service = new llm.Service(getConfig(), getOutput);
+  const services = new Map<string, llm.Service>();
+  const getService = (languageId: string) => {
+    let service = services.get(languageId);
+    if (service) {
+      return service;
+    }
+
+    const config = getConfig(languageId);
+    service = new llm.Service(config, getOutput);
+    services.set(languageId, service);
+    return service;
+  };
 
   push(vscode.workspace.onDidChangeConfiguration((event) => {
     if (event.affectsConfiguration("bot-typist.llm")) {
-      service.config = getConfig();
+      services.clear();
     }
   }));
 
@@ -40,7 +52,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   push(vscode.commands.registerCommand(
     "bot-typist.insert-reply",
-    () => insertBotReply(service),
+    () => insertBotReply(getService),
   ));
   push(vscode.commands.registerCommand(
     "bot-typist.show-prompt",
@@ -100,7 +112,9 @@ async function createJupyterNotebookForChat(): Promise<boolean> {
 }
 
 /** If in a notebook cell, inserts cells below with the bot's reply. */
-async function insertBotReply(service: llm.Service): Promise<boolean> {
+async function insertBotReply(
+  getService: (languageId: string) => llm.Service,
+): Promise<boolean> {
   const cell = getActiveCell();
   if (!cell) {
     vscode.window.showInformationMessage(
@@ -117,6 +131,8 @@ async function insertBotReply(service: llm.Service): Promise<boolean> {
     return false;
   }
 
+  const languageId = getNotebookLanguage(cell);
+  const service = getService(languageId);
   const llmPath = await service.checkCommandPath();
   if (!llmPath) {
     const msg =
@@ -125,7 +141,7 @@ async function insertBotReply(service: llm.Service): Promise<boolean> {
     return false;
   }
 
-  const cue = getConfig().cue;
+  const cue = getConfig(languageId).cue;
   if (!await checkCueLabel(cue)) {
     showSettingsError(
       "Sorry, the cue you chose isn't supported yet.",
@@ -154,7 +170,8 @@ async function insertBotReply(service: llm.Service): Promise<boolean> {
       vscode.window.showInformationMessage("Insert bot reply: cancelled");
     } else if (e instanceof ChildExitError) {
       if (
-        e.stderr.includes("Usage: llm") && extraArgsChangedFromDefault()
+        e.stderr.includes("Usage: llm") &&
+        extraArgsChangedFromDefault(languageId)
       ) {
         const msg =
           "The llm command exited with a usage error. (See output.) Perhaps it's the extra arguments setting?";
@@ -203,7 +220,8 @@ async function showBotPrompt(): Promise<boolean> {
     return false;
   }
 
-  const system = getConfig().systemPrompt;
+  const languageId = getNotebookLanguage(cell);
+  const system = getConfig(languageId).systemPrompt;
   const content = `System Prompt\n---\n${system}\nUser Prompt\n---\n${prompt}`;
 
   const doc = await vscode.workspace.openTextDocument({

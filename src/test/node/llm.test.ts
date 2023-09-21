@@ -76,29 +76,5 @@ describe("llm.Service", () => {
           "echo --system $systemPrompt --model gpt5 -o stop '\\n#done\\n' --asdf\n\n",
       );
     });
-
-    it("uses the new config after it changes", async () => {
-      const config: llm.Config = {
-        path: "echo",
-        systemPrompt: "You're a bat",
-        model: "huh",
-        stop: "#eof",
-        extraArgs: ["--jkl"],
-      };
-      const testChannel = new TestChannel();
-      const service = new llm.Service(config, () => testChannel);
-
-      service.config = {
-        path: "echo",
-        systemPrompt: "",
-        model: "",
-        stop: "",
-        extraArgs: [],
-      };
-
-      const result = await service.run("", readAll);
-      expect(result).toEqual("\n");
-      expect(testChannel.log).toEqual("echo\n\n");
-    });
   });
 });

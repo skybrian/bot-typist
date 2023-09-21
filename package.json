@@ -20,29 +20,29 @@
           "order": 1,
           "type": "string",
           "default": "🤖",
-          "scope": "machine-overridable",
+          "scope": "language-overridable",
           "markdownDescription": "A label that will automatically be added before the bot's response in each markdown cell."
         },
         "bot-typist.llm.path": {
           "order": 2,
           "type": "string",
           "default": "llm",
-          "scope": "machine-overridable",
+          "scope": "language-overridable",
           "markdownDescription": "Path to the `llm` command to use. To install this command, see the [LLM Documentation](https://llm.datasette.io/en/stable/setup.html)"
         },
         "bot-typist.llm.systemPrompt": {
           "order": 3,
           "type": "string",
           "editPresentation": "multilineText",
-          "default": "You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.\n\nYou can see any Markdown and Python cells from the conversation so far, indicated by #markdown and #python. If the user executed a Python cell, each cell output will follow it, indicated by #output.\n\nYou can reply using Markdown. Python code blocks should contain real Python code that will run without errors. They will be converted into Python cells and executed when the user chooses.\n\nTo display an image, write Python code that evaluates to an image object. The image will appear as a cell output.",
-          "scope": "machine-overridable",
+          "default": "You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.\n\nYou can see any cells from the conversation so far.",
+          "scope": "language-overridable",
           "markdownDescription": "If set, overrides the system prompt sent to `llm`."
         },
         "bot-typist.llm.model": {
           "order": 4,
           "type": "string",
           "default": "",
-          "scope": "machine-overridable",
+          "scope": "language-overridable",
           "markdownDescription": "The name of the model that the `llm` command should use. (See [LLM's usage documentation](https://llm.datasette.io/en/stable/usage.html).)"
         },
         "bot-typist.llm.stop": {
@@ -50,7 +50,7 @@
           "type": "string",
           "editPresentation": "multilineText",
           "default": "\n%output\n",
-          "scope": "machine-overridable",
+          "scope": "language-overridable",
           "markdownDescription": "If the bot writes this string, its response will be cut off. (See [article](https://help.openai.com/en/articles/5072263-how-do-i-use-stop-sequences).)"
         },
         "bot-typist.llm.extraArguments": {
@@ -60,9 +60,17 @@
             "type": "string"
           },
           "default": [],
-          "scope": "machine-overridable",
+          "scope": "language-overridable",
           "markdownDescription": "Any additional arguments to pass to `llm`."
         }
+      }
+    },
+    "configurationDefaults": {
+      "[python]": {
+        "bot-typist.llm.systemPrompt": "You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.\n\nYou can see any Markdown and Python cells from the conversation so far, indicated by #markdown and #python. If the user executed a Python cell, each cell output will follow it, indicated by #output.\n\nYou can reply using Markdown. Python code blocks should contain real Python code that will run without errors. They will be converted into Python cells and executed when the user chooses.\n\nTo display an image, write Python code that evaluates to an image object. The image will appear as a cell output."
+      },
+      "[typescript]": {
+        "bot-typist.llm.systemPrompt": "You are a helpful AI assistant that's participating in a conversation in a Jupyter notebook.\n\nYou can see any Markdown and TypeScript cells from the conversation so far, indicated by #markdown and #typescript. If the user executed a TypeScript cell, each cell output will follow it, indicated by #output.\n\nYou can reply using Markdown. TypeScript code blocks should contain real TypeScript code that will run without errors. They will be converted into TypeScript cells and executed when the user chooses."
       }
     },
     "commands": [
