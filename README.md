@@ -18,7 +18,9 @@ Having a conversation about code in a Python notebook that's running on your own
 * You can install whatever Python packages you like.
 * You can edit the chat transcript any way you like. This means you can fix mistakes that the bot makes or write code yourself. You aren't forced to always be the back seat driver.
 
-### Q: Will Bot Typist automatically run the Python code that the bot generates?
+Also, you might want to use some language besides Python? So far, I've added support for TypeScript.
+
+### Q: Will Bot Typist automatically run the code that the bot generates?
 
 A: No, and that's intentional. Since there's no sandbox, I think it's a bit too risky. Instead, you can run the cells yourself. (Hopefully after reading them!)
 
@@ -26,7 +28,7 @@ But the result is still much like Code Interpreter. If running a cell fails with
 
 Also, after getting corrected code, you can delete the mistaken code and the apology if you like. That will conserve context window (and money) as the conversation gets longer.
 
-Another problem this avoids is that when using Code Interpreter, it will often read Python output and lie to you about it, claiming that a test passed when it actually failed. I find it's better to read it myself. If you find the output surprising or confusing, you could ask questions about it, though.
+Another problem this avoids is that when using Code Interpreter, it will often read interpreter output and lie to you about it, claiming that a test passed when it actually failed. I find it's better to read it myself. If you find the output surprising or confusing, you could ask questions about it, though.
 
 ### Q: Which bots can I chat with?
 
@@ -78,7 +80,7 @@ Required:
 
 Optional:
 
-- `bot-typist.llm.systemPrompt` overrides the system prompt if set.
+- `bot-typist.llm.systemPrompt` overrides the system prompt if set. (I recommend using a [language-specific setting](https://code.visualstudio.com/docs/getstarted/settings#_language-specific-editor-settings).)
 
 - `bot-typist.llm.model` sets the model. (For example, 'gpt4'.) Otherwise, it uses whatever llm's default model is.
 
@@ -89,15 +91,22 @@ to stop the bot if it tries to generate Python output.
 
 - `bot-typist.cue` lets you change the label used to indicate the bot's responses. The default is a robot emoji ('🤖').
 
+All these settings can be customized for each programming language.
+
 ## Known Issues
 
 * The only way I've tested it is running VS Code locally on a Mac. It might work on Windows, who knows? Send a patch. Getting Bot Typist to work on [vscode.dev](https://vscode.dev/) and/or [Github Codespaces](https://github.com/features/codespaces) might be fun, too, but I've never used them.
 
-* For now, there's no support for creating code cells in any language other than Python. It wouldn't be hard to do, though. Julia anyone?
+* For now, there's no support for creating code cells in any language other than Python or TypeScript. It wouldn't be hard to do, though. Julia anyone?
 
 * There are other notebooks besides Jupyter. Adding support for them might be fun?
 
 ## Release Notes
+
+### 0.4.0 - "Deno notebooks are a thing now."
+
+* Added TypeScript support. (Only tested with Deno.)
+* Configuration settings can be customized per-language.
 
 ### 0.3.0 - "Stopping is important"
 
