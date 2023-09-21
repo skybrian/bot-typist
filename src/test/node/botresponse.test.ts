@@ -13,7 +13,7 @@ import {
 import { StringWriter } from "../../lib/streams";
 
 interface Cell {
-  lang: string;
+  type: "code" | "markup";
   text: string;
 }
 
@@ -34,7 +34,7 @@ class TestCellWriter implements CellWriter {
         throw new Error("write after done");
       }
       if (this.cells.length === 0) {
-        this.cells.push({ lang: "markdown", text: "" });
+        this.cells.push({ type: "markup", text: "" });
       }
       this.cells[this.cells.length - 1].text += text;
       return true;
@@ -54,7 +54,7 @@ class TestCellWriter implements CellWriter {
       if (this.done) {
         throw new Error("startCodeCell after done");
       }
-      this.cells.push({ lang: "python", text: "" });
+      this.cells.push({ type: "code", text: "" });
       return true;
     } finally {
       this.writing = false;
@@ -72,7 +72,7 @@ class TestCellWriter implements CellWriter {
       if (this.done) {
         throw new Error("startMarkdownCell after done");
       }
-      this.cells.push({ lang: "markdown", text: "" });
+      this.cells.push({ type: "markup", text: "" });
       return true;
     } finally {
       this.writing = false;
@@ -100,6 +100,8 @@ class TestCellWriter implements CellWriter {
 
 const anyWhitespace = fc.stringOf(fc.constantFrom(" ", "\t"));
 
+const tags = ["python", "typescript", "markdown"].map((s) => `%${s}\n`);
+
 describe("BotResponse", () => {
   describe("matchHeaderLine", () => {
     it("returns null if there's no input", async () => {
@@ -108,9 +110,14 @@ describe("BotResponse", () => {
     });
 
     it("returns null if there's no match", async () => {
-      const input = fc.unicodeString().filter((s) =>
-        !s.startsWith("%python\n") && !s.startsWith("%markdown\n")
-      );
+      const input = fc.unicodeString().filter((s) => {
+        for (const t of tags) {
+          if (s.startsWith(t)) {
+            return false;
+          }
+        }
+        return true;
+      });
 
       await fc.assert(
         fc.asyncProperty(anyChunksOf(input), async ({ chunks }) => {
@@ -137,7 +144,7 @@ describe("BotResponse", () => {
     it("copies nothing if there's no input", async () => {
       const response = new BotResponse(new TestReader([]));
       const writer = new StringWriter();
-      await response.copyPython(writer);
+      await response.copyCodeCell(writer);
       expect(writer.buffer).toBe("");
     });
 
@@ -157,7 +164,7 @@ describe("BotResponse", () => {
         fc.asyncProperty(chunked, async ({ original, chunks }) => {
           const response = new BotResponse(new TestReader(chunks));
           const writer = new StringWriter();
-          await response.copyPython(writer);
+          await response.copyCodeCell(writer);
           expect(writer.buffer).toBe(original);
         }),
       );
@@ -177,7 +184,7 @@ describe("BotResponse", () => {
         await fc.assert(fc.asyncProperty(args, async ({ original, chunks }) => {
           const response = new BotResponse(new TestReader(chunks));
           const writer = new StringWriter();
-          await response.copyPython(writer);
+          await response.copyCodeCell(writer);
           expect(writer.buffer).toBe(original);
         }));
       });
@@ -252,8 +259,8 @@ describe("BotResponse", () => {
       const response = new BotResponse(reader, "robot");
       await response.copy(writer);
       expect(writer.cells).toEqual([{
-        "lang": "markdown",
-        "text": "robot: (no response)",
+        type: "markup",
+        text: "robot: (no response)",
       }]);
     });
 
@@ -266,7 +273,7 @@ describe("BotResponse", () => {
         const writer = new TestCellWriter();
         await new BotResponse(reader).copy(writer);
         expect(writer.cells).toEqual([{
-          lang: "markdown",
+          type: "markup",
           text: `bot: ${text}`,
         }]);
       }));
@@ -287,49 +294,57 @@ describe("BotResponse", () => {
         const writer = new TestCellWriter();
         await new BotResponse(reader).copy(writer);
         const expected = text.trimStart();
-        expect(writer.cells).toEqual([{ lang: "markdown", text: expected }]);
+        expect(writer.cells).toEqual([{ type: "markup", text: expected }]);
       }));
     });
 
     const anyCellText = fc.unicodeString({ minLength: 1 }).map((s) =>
       s.trim() + "\n"
-    ).filter((s) =>
-      s.length > 1 &&
-      !s.startsWith("%python\n") &&
-      !s.startsWith("%markdown\n") &&
-      !s.startsWith("```python\n") &&
-      !s.includes("\n%python\n") &&
-      !s.includes("\n%markdown\n") &&
-      !s.includes("\n```python\n")
-    );
+    ).filter((s) => {
+      if (s.length < 2) {
+        return false;
+      }
+      for (const tag of tags) {
+        if (s.startsWith(tag) || s.startsWith("\n" + tag)) {
+          return false;
+        }
+      }
+      return true;
+    });
 
     const anyBlankLines = fc.stringOf(anyWhitespace.map((s) => s + "\n"), {
       minLength: 1,
     });
 
-    const anyPythonWithHeader = anyCellText.chain((output) => {
-      const normalBlock = anyBlankLines.map((blanks) =>
-        `%python\n${blanks}${output}`
-      );
-      const cell: Cell = { lang: "python", text: output };
-      return normalBlock.map((input) => {
-        return { input, cell };
-      });
-    });
+    const anyLanguage = fc.constantFrom("python", "typescript");
 
-    const anyPythonInCodeBlock = anyCellText.chain((output) => {
-      const codeBlock = anyWhitespace.map((space) =>
-        "```python\n" + output + "```" + space + "\n"
-      );
-      const cell: Cell = { lang: "python", text: output };
-      return codeBlock.map((input) => {
-        return { input, cell };
-      });
-    });
+    const anyCodeWithHeader = fc.tuple(anyLanguage, anyCellText).chain(
+      ([language, output]) => {
+        const normalBlock = anyBlankLines.map((blanks) =>
+          `%${language}\n${blanks}${output}`
+        );
+        const cell: Cell = { type: "code", text: output };
+        return normalBlock.map((input) => {
+          return { input, cell };
+        });
+      },
+    );
 
-    it("copies a Python cell by itself", async () => {
-      const anyPython = fc.oneof(anyPythonWithHeader, anyPythonInCodeBlock);
-      const args = anyPython.chain(({ input, cell }) =>
+    const anyCodeInCodeBlock = fc.tuple(anyLanguage, anyCellText).chain(
+      ([language, output]) => {
+        const codeBlock = anyWhitespace.map((space) =>
+          "```" + language + "\n" + output + "```" + space + "\n"
+        );
+        const cell: Cell = { type: "code", text: output };
+        return codeBlock.map((input) => {
+          return { input, cell };
+        });
+      },
+    );
+
+    it("copies a code cell by itself", async () => {
+      const anyCode = fc.oneof(anyCodeWithHeader, anyCodeInCodeBlock);
+      const args = anyCode.chain(({ input, cell }) =>
         anyChunksOf(fc.constant(input)).map((chunked) => ({ chunked, cell }))
       );
 
@@ -349,7 +364,7 @@ describe("BotResponse", () => {
     );
 
     const anyMarkdownParseWithHeader = anyMarkdownText.chain((output) => {
-      const cell: Cell = { lang: "markdown", text: output };
+      const cell: Cell = { type: "markup", text: output };
 
       const inputText = output.startsWith("bot: ")
         ? fc.constantFrom(output, output.slice(4))
@@ -378,7 +393,7 @@ describe("BotResponse", () => {
     });
 
     const anyMarkdownParseWithoutHeader = anyMarkdownText.chain((output) => {
-      const cell: Cell = { lang: "markdown", text: output };
+      const cell: Cell = { type: "markup", text: output };
 
       const inputText = output.startsWith("bot: ")
         ? fc.constantFrom(output, output.slice(4))
@@ -388,9 +403,9 @@ describe("BotResponse", () => {
       return input.map((text) => ({ input: text, cell }));
     });
 
-    it("copies a Python cell block followed by a Markdown text (without a header)", async () => {
+    it("copies a code cell block followed by a Markdown text (without a header)", async () => {
       const args: fc.Arbitrary<{ input: string; cell: Cell }[]> = fc.tuple(
-        anyPythonInCodeBlock,
+        anyCodeInCodeBlock,
         anyMarkdownParseWithoutHeader,
       );
 
@@ -404,9 +419,9 @@ describe("BotResponse", () => {
       );
     });
 
-    it("copies a Python code block followed by a Markdown cell", async () => {
+    it("copies a code code block followed by a Markdown cell", async () => {
       const args: fc.Arbitrary<{ input: string; cell: Cell }[]> = fc.tuple(
-        anyPythonInCodeBlock,
+        anyCodeInCodeBlock,
         anyMarkdownParseWithHeader,
       );
       await fc.assert(
@@ -421,9 +436,9 @@ describe("BotResponse", () => {
 
     const anyCellCluster: fc.Arbitrary<{ input: string; cell: Cell }[]> = fc
       .oneof(
-        anyPythonWithHeader.map((s) => [s]),
+        anyCodeWithHeader.map((s) => [s]),
         anyMarkdownParseWithHeader.map((s) => [s]),
-        fc.tuple(anyMarkdownParseWithHeader, anyPythonInCodeBlock),
+        fc.tuple(anyMarkdownParseWithHeader, anyCodeInCodeBlock),
       );
 
     const anyCellParses = fc.array(anyCellCluster, {

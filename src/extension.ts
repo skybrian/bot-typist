@@ -77,14 +77,6 @@ async function createJupyterNotebookForChat(): Promise<boolean> {
       cells: [],
       metadata: {
         orig_nbformat: 4,
-        // Try to select a Python 3 kernel.
-        // These settings assume a virtual environment containing Jupyter.
-        // See: jupyter kernelspec list
-        kernelspec: {
-          display_name: "Python 3",
-          language: "python",
-          name: "python3",
-        },
       },
       nbformat: 4,
       nbformat_minor: 2,

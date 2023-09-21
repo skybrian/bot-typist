@@ -1,7 +1,9 @@
 import { DONE, Reader, ReadResult, WriteCloser, Writer } from "./streams";
 import { Scanner } from "./scanner";
 
-export const allCellTypes = ["markdown", "python"] as const;
+const allLanguages = ["python", "typescript"] as const;
+
+export const allCellTypes = ["markdown", ...allLanguages] as const;
 
 type CellType = typeof allCellTypes[number];
 
@@ -33,7 +35,7 @@ export class BotResponse {
    * Splits input into cells and sends them separately to the output.
    * Cells are separated by lines starting with '%'.
    * The '%' should be followed by the cell type, e.g. '%python'.
-   * Currently supports python and markdown cells.
+   * Currently supports python, typescript, and markdown cells.
    *
    * @throws CANCELLED if the writer cancelled the copy.
    */
@@ -72,10 +74,10 @@ export class BotResponse {
         await output.startMarkdownCell();
         await this.skipBlankLines();
         await this.copyMarkdown(output);
-      } else if (header.type === "python") {
+      } else {
         await output.startCodeCell();
         await this.skipBlankLines();
-        await this.copyPython(output);
+        await this.copyCodeCell(output);
       }
 
       if (this.atEnd) {
@@ -98,13 +100,13 @@ export class BotResponse {
   }
 
   async matchHeaderLine(): Promise<HeaderLine | null> {
-    if (await this.#stream.startsWith("%python\n")) {
-      return { type: "python", line: "%python\n" };
-    } else if (await this.#stream.startsWith("%markdown\n")) {
-      return { type: "markdown", line: "%markdown\n" };
-    } else {
-      return null;
+    for (const lang of allCellTypes) {
+      const header = `%${lang}\n`;
+      if (await this.#stream.startsWith(header)) {
+        return { type: lang, line: header };
+      }
     }
+    return null;
   }
 
   async copyOrAddCue(output: Writer): Promise<void> {
@@ -123,15 +125,33 @@ export class BotResponse {
     }
   }
 
+  async skipCodeBlockHeader() {
+    for (const lang of allLanguages) {
+      if (await this.#stream.skipToken("```" + lang + "\n")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async startsWithCodeBlockHeader() {
+    for (const lang of allLanguages) {
+      if (await this.#stream.startsWith("```" + lang + "\n")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   async copyMarkdown(output: CellWriter): Promise<void> {
-    if (await this.#stream.skipToken("```python\n")) {
+    if (await this.skipCodeBlockHeader()) {
       await this.copyCodeBlock(output);
     } else {
       await this.copyOrAddCue(output);
     }
 
     while (!this.#stream.atEnd && !await this.matchHeaderLine()) {
-      if (await this.#stream.skipToken("```python\n")) {
+      if (await this.skipCodeBlockHeader()) {
         await this.copyCodeBlock(output);
       } else if (!await this.#stream.copyLineTo(output)) {
         throw CANCELLED;
@@ -164,14 +184,14 @@ export class BotResponse {
     await this.skipBlankLines();
     if (
       !this.atEnd && !await this.matchHeaderLine() &&
-      !await this.#stream.startsWith("```python\n")
+      !await this.startsWithCodeBlockHeader()
     ) {
       await output.startMarkdownCell();
       await this.copyOrAddCue(output);
     }
   }
 
-  async copyPython(output: Writer): Promise<void> {
+  async copyCodeCell(output: Writer): Promise<void> {
     while (!this.#stream.atEnd) {
       if (await this.matchHeaderLine()) {
         return;
